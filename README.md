@@ -37,11 +37,13 @@ TypeScript版 現場で活用するためのAIエージェント実践入門
 | [Biome](https://biomejs.dev/) | リンター・フォーマッター |
 | [Docusaurus](https://docusaurus.io/) | ドキュメントサイト |
 
-## direnvのインストール
+## セットアップ
+
+### direnvのインストール
 
 direnvを使って環境変数を管理します。
 
-### macOS (Homebrew)
+#### macOS (Homebrew)
 
 ```zsh
 brew install direnv
@@ -54,7 +56,7 @@ echo 'eval "$(direnv hook zsh)"' >> ~/.zshrc
 source ~/.zshrc
 ```
 
-### `.envrc` の設定
+#### `.envrc` の設定
 
 プロジェクトルートに `.envrc` ファイルを作成し、必要な環境変数を記述します。
 
@@ -63,33 +65,27 @@ cp .envrc.example .envrc  # テンプレートがある場合
 direnv allow
 ```
 
-## pnpmのインストール
+### pnpmのインストール
 
-### Homebrew
+#### Homebrew
 
 ```zsh
 brew install pnpm
 ```
 
-### npm
+#### npm
 
 ```zsh
 npm install -g pnpm
 ```
 
-## npmパッケージのインストール
+### npmパッケージのインストール
 
 ```zsh
 pnpm install
 ```
 
 ## 使用方法
-
-### サンプルコードの実行
-
-```zsh
-pnpm tsx chapter3/test3-1-chat-completions-api.ts
-```
 
 ### ドキュメントサイト
 
@@ -99,6 +95,12 @@ pnpm dev:docs
 
 # ビルド
 pnpm build:docs
+```
+
+### サンプルコードの実行
+
+```zsh
+pnpm tsx chapter3/test3-1-chat-completions-api.ts
 ```
 
 ### 特定パッケージでのコマンド実行
