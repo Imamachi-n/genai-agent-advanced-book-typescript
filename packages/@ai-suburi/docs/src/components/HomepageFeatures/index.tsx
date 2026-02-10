@@ -1,4 +1,3 @@
-import Heading from "@theme/Heading";
 import clsx from "clsx";
 import type { ReactNode } from "react";
 import styles from "./styles.module.css";
@@ -47,12 +46,13 @@ const FeatureList: FeatureItem[] = [
 function Feature({ title, imgSrc, description }: FeatureItem) {
   return (
     <div className={clsx("col col--4")}>
-      <div className="text--center">
-        <img className={styles.featureSvg} src={imgSrc} alt={title} />
-      </div>
-      <div className="text--center padding-horiz--md">
-        <Heading as="h3">{title}</Heading>
-        <p>{description}</p>
+      <div className={styles.featureCard}>
+        <div className={styles.featureCardAccent} />
+        <div className={styles.featureIconWrapper}>
+          <img className={styles.featureSvg} src={imgSrc} alt={title} />
+        </div>
+        <h3 className={styles.featureTitle}>{title}</h3>
+        <p className={styles.featureDescription}>{description}</p>
       </div>
     </div>
   );
@@ -62,6 +62,10 @@ export default function HomepageFeatures(): ReactNode {
   return (
     <section className={styles.features}>
       <div className="container">
+        <h2 className={styles.sectionTitle}>このドキュメントで学べること</h2>
+        <p className={styles.sectionSubtitle}>
+          AI エージェントの理解から実装・運用まで、3 つのステップで学べます
+        </p>
         <div className="row">
           {FeatureList.map((props, idx) => (
             <Feature key={idx} {...props} />
