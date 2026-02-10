@@ -12,6 +12,7 @@
   "license": "ISC",
   "dependencies": {
     "@tavily/core": "^0.7.1",
+    "langchain": "^1.2.19",
     "openai": "^6.17.0",
     "zod": "^4.3.6"
   },

@@ -13,6 +13,7 @@ sidebar_position: 1
 - **JSON モード**と **Structured Outputs** による構造化された出力の取得
 - **Function Calling** を使った外部ツールとの連携パターン
 - **Tavily API** を使った AI エージェント向けの Web 検索
+- **LangChain** の `tool` ヘルパーによるカスタム Tool 定義
 
 :::
 
@@ -27,6 +28,7 @@ sidebar_position: 1
 | 3-4 | Zod スキーマを用いた Structured Outputs |
 | 3-6 | Function Calling による外部ツール連携 |
 | 3-7 | Tavily API を使った Web 検索 |
+| 3-8 | LangChain カスタム Tool 定義 |
 
 :::info 前提条件
 
@@ -432,6 +434,77 @@ results.forEach((result, i) => {
 pnpm tsx chapter3/test3-7-tavily-search.ts
 ```
 
+## 3-8. LangChain カスタム Tool 定義
+
+[LangChain](https://js.langchain.com/) の `tool` ヘルパーを使うと、AI エージェントが利用できるカスタム Tool を簡潔に定義できます。
+3-6 の Function Calling では OpenAI API のスキーマ定義を直接記述しましたが、LangChain では Zod スキーマと関数をまとめて定義でき、より宣言的に Tool を作成できます。
+
+### LangChain の Tool とは？
+
+LangChain の Tool は、AI エージェントが外部の機能を呼び出すための統一的なインターフェースです。`@langchain/core/tools` が提供する `tool` ヘルパー関数を使うことで、以下の要素を 1 つにまとめて定義できます。
+
+| 要素 | 説明 |
+| --- | --- |
+| `name` | Tool の名前。エージェントが呼び出す際の識別子 |
+| `description` | Tool の説明。エージェントがどの Tool を使うか判断する際に参照される |
+| `schema` | Zod スキーマで定義する引数の型とバリデーション |
+| 関数本体 | 実際に実行される処理（非同期関数） |
+
+### サンプルで行うこと
+
+このサンプルでは以下を行います。
+
+- Zod で引数スキーマ（2 つの整数）を定義
+- `tool` ヘルパーで加算 Tool を作成
+- `invoke()` メソッドで Tool を実行
+- Tool に関連付けられた属性（`name`、`description`、`schema`）の確認
+
+```typescript title="chapter3/test3-8-custom-tool-definition.ts"
+import { tool } from "@langchain/core/tools";
+import { z } from "zod";
+
+// 引数スキーマを定義
+const AddArgs = z.object({
+  a: z.number().int().describe("加算する最初の整数。"),
+  b: z.number().int().describe("加算する2つ目の整数。"),
+});
+
+// Tool定義
+const add = tool(
+  async ({ a, b }): Promise<string> => {
+    return String(a + b);
+  },
+  {
+    name: "add",
+    description: [
+      "このToolは2つの整数を引数として受け取り、それらの合計を返します。",
+      "",
+      "使用例:",
+      "  例:",
+      '    入力: {"a": 3, "b": 5}',
+      "    出力: 8",
+    ].join("\n"),
+    schema: AddArgs,
+  },
+);
+
+// 実行例
+const args = { a: 5, b: 10 };
+const result = await add.invoke(args); // Toolを呼び出す
+console.log(`Result: ${result}`); // Result: 15
+
+// Toolに関連付けられている属性の確認
+console.log(add.name);
+console.log(add.description);
+console.log(add.schema);
+```
+
+**実行方法:**
+
+```bash
+pnpm tsx chapter3/test3-8-custom-tool-definition.ts
+```
+
 ---
 
 ## 参考文献
@@ -441,3 +514,4 @@ pnpm tsx chapter3/test3-7-tavily-search.ts
 - OpenAI. [Function Calling](https://platform.openai.com/docs/guides/function-calling) - Function Calling の公式ドキュメント
 - [Zod](https://zod.dev/) - TypeScript ファーストのスキーマバリデーションライブラリ
 - [Tavily](https://docs.tavily.com/) - AI エージェント向け Web 検索 API の公式ドキュメント
+- [LangChain Tools](https://js.langchain.com/docs/how_to/custom_tools/) - LangChain カスタム Tool の公式ドキュメント
