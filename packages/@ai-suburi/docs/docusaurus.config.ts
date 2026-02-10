@@ -130,8 +130,8 @@ const config: Config = {
       copyright: `Copyright © ${new Date().getFullYear()} Naoto Imamachi`,
     },
     prism: {
-      theme: prismThemes.palenight,
-      darkTheme: prismThemes.palenight,
+      theme: prismThemes.nightOwl,
+      darkTheme: prismThemes.nightOwl,
     },
   } satisfies Preset.ThemeConfig,
 };
