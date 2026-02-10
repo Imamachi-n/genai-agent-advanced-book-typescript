@@ -1,0 +1,23 @@
+{
+  "name": "@ai-suburi/core",
+  "version": "1.0.0",
+  "description": "AI Agent Advanced Book TypeScript Examples",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@tavily/core": "^0.7.1",
+    "openai": "^6.17.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^25.1.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}

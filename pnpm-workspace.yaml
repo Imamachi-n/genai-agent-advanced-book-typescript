@@ -1,0 +1,3 @@
+packages:
+  - "packages/@ai-suburi/core"
+  - "packages/@ai-suburi/docs"
