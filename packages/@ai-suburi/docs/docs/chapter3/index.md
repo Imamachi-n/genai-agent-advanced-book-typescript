@@ -4,12 +4,21 @@ sidebar_position: 1
 
 # Chapter 3: AIエージェントの開発準備
 
-第3章のサンプルコード解説です。
+この章では、AI エージェントを構築するための土台となる OpenAI API の基本的な使い方を、実際のコードを動かしながら学んでいきます。
+[Chapter 2](../chapter2/index.md) で解説した「プロフィール」「メモリ」「ツール」「プランニング」の各コンポーネントが、API レベルではどのように実現されるのかを体感できる内容になっています。
+
+:::note この章で学ぶこと
+
+- **Chat Completions API** の基本的な呼び出し方とトークン使用量の確認
+- **JSON モード**と **Structured Outputs** による構造化された出力の取得
+- **Function Calling** を使った外部ツールとの連携パターン
+- **Tavily API** を使った AI エージェント向けの Web 検索
+
+:::
 
 ## 概要
 
-この章では、OpenAI API を使用した基本的な実装について解説します。
-以下のトピックを扱います。
+以下のトピックを扱います。セクション番号は参考元の書籍に合わせています。
 
 | セクション | 内容 |
 | --- | --- |
@@ -25,6 +34,15 @@ sidebar_position: 1
 - 3-7 のみ、環境変数 `TAVILY_API_KEY` に Tavily の API キーが設定されていること
 
 :::
+
+### サンプルコードの実行方法
+
+各サンプルは、リポジトリのルートディレクトリから以下のコマンドで実行できます。
+
+```bash
+# ルートディレクトリで実行（pnpm tsx は @ai-suburi/core パッケージ内で tsx を実行するエイリアス）
+pnpm tsx chapter3/<ファイル名>.ts
+```
 
 ## 3-1. Chat Completions API
 
@@ -413,3 +431,13 @@ results.forEach((result, i) => {
 ```bash
 pnpm tsx chapter3/test3-7-tavily-search.ts
 ```
+
+---
+
+## 参考文献
+
+- OpenAI. [Chat Completions API](https://platform.openai.com/docs/guides/text-generation) - Chat Completions API の公式ガイド
+- OpenAI. [Structured Outputs](https://platform.openai.com/docs/guides/structured-outputs) - JSON モードおよび Structured Outputs の公式ドキュメント
+- OpenAI. [Function Calling](https://platform.openai.com/docs/guides/function-calling) - Function Calling の公式ドキュメント
+- [Zod](https://zod.dev/) - TypeScript ファーストのスキーマバリデーションライブラリ
+- [Tavily](https://docs.tavily.com/) - AI エージェント向け Web 検索 API の公式ドキュメント

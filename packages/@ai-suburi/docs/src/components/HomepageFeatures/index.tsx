@@ -1,7 +1,7 @@
-import type {ReactNode} from 'react';
-import clsx from 'clsx';
-import Heading from '@theme/Heading';
-import styles from './styles.module.css';
+import Heading from "@theme/Heading";
+import clsx from "clsx";
+import type { ReactNode } from "react";
+import styles from "./styles.module.css";
 
 type FeatureItem = {
   title: string;
@@ -11,43 +11,42 @@ type FeatureItem = {
 
 const FeatureList: FeatureItem[] = [
   {
-    title: 'AI エージェントを知る',
-    imgSrc: require('@site/static/img/1-icon.png').default,
+    title: "AI エージェントを知る",
+    imgSrc: require("@site/static/img/1-icon.png").default,
     description: (
       <>
-        AI エージェントの定義やビジネスでの位置づけから、
-        ツール呼び出し・計画・自己修正・メモリといった内部構成まで、
+        AI
+        エージェントの定義やビジネスでの位置づけから、ツール呼び出し・計画・自己修正・メモリといった内部構成まで、
         全体像を体系的に理解できます。
       </>
     ),
   },
   {
-    title: 'AI エージェントを作る',
-    imgSrc: require('@site/static/img/2-icon.png').default,
+    title: "AI エージェントを作る",
+    imgSrc: require("@site/static/img/2-icon.png").default,
     description: (
       <>
         OpenAI API と TypeScript を使い、ヘルプデスク支援・データ分析・
-        情報収集・マーケティング支援など、目的別の AI エージェントを
-        実際に構築していきます。
+        情報収集・マーケティング支援など、目的別の AI
+        エージェントを実際に構築していきます。
       </>
     ),
   },
   {
-    title: 'AI エージェントを現場で使う',
-    imgSrc: require('@site/static/img/3-icon.png').default,
+    title: "AI エージェントを現場で使う",
+    imgSrc: require("@site/static/img/3-icon.png").default,
     description: (
       <>
-        評価指標の設計やエラー分析、UX・リスク管理・モニタリングなど、
-        AI エージェントを本番環境で運用するための実践的なノウハウを
-        企業の実用化事例とともに学べます。
+        評価指標の設計やエラー分析、UX・リスク管理・モニタリングなど、AI
+        エージェントを本番環境で運用するための実践的なノウハウを企業の実用化事例とともに学べます。
       </>
     ),
   },
 ];
 
-function Feature({title, imgSrc, description}: FeatureItem) {
+function Feature({ title, imgSrc, description }: FeatureItem) {
   return (
-    <div className={clsx('col col--4')}>
+    <div className={clsx("col col--4")}>
       <div className="text--center">
         <img className={styles.featureSvg} src={imgSrc} alt={title} />
       </div>

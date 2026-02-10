@@ -14,6 +14,11 @@ const config: Config = {
     v4: true, // Improve compatibility with the upcoming Docusaurus v4
   },
 
+  markdown: {
+    mermaid: true,
+  },
+  themes: ["@docusaurus/theme-mermaid"],
+
   // Set the production url of your site here
   url: "https://Imamachi-n.github.io",
   // Set the /<baseUrl>/ pathname under which your site is served
@@ -86,7 +91,11 @@ const config: Config = {
           title: "Docs",
           items: [
             {
-              label: "Docs",
+              label: "Chapter 2: AIエージェントの構成",
+              to: "/docs/chapter2",
+            },
+            {
+              label: "Chapter 3: AIエージェントの開発準備",
               to: "/docs/chapter3",
             },
           ],
