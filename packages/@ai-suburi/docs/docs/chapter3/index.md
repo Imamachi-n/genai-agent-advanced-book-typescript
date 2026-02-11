@@ -15,27 +15,39 @@ sidebar_position: 1
 - **Tavily API** を使った AI エージェント向けの Web 検索
 - **LangChain** の `tool` ヘルパーによるカスタム Tool 定義
 - **DuckDuckGo** を使った無料の Web 検索とページ取得
+- **Text-to-SQL** による自然言語からの SQL クエリ生成と検索
 
 :::
 
 ## 概要
 
-以下のトピックを扱います。セクション番号は参考元の書籍に合わせています。
+### 学習の流れ
 
-| セクション | 内容 |
-| --- | --- |
-| 3-1 | Chat Completions API の基本的な使い方 |
-| 3-3 | JSON モードによる構造化された出力 |
-| 3-4 | Zod スキーマを用いた Structured Outputs |
-| 3-6 | Function Calling による外部ツール連携 |
-| 3-7 | Tavily API を使った Web 検索 |
-| 3-8 | LangChain カスタム Tool 定義 |
-| 3-9 | DuckDuckGo Web 検索 |
+この章のセクションは、以下のように段階的に学べる構成になっています。前半で API の基本と出力形式を押さえ、後半でツール連携と実践的な活用に進みます。
+
+```mermaid
+flowchart LR
+    A["<b>3-1</b><br/>Chat Completions API<br/>（基本の API 呼び出し）"] --> B["<b>3-3</b><br/>JSON モード<br/>（出力を JSON に制約）"]
+    B --> C["<b>3-4</b><br/>Structured Outputs<br/>（スキーマ準拠の出力）"]
+    C --> D["<b>3-6</b><br/>Function Calling<br/>（外部ツール連携）"]
+    D --> E["<b>3-7 / 3-9</b><br/>Web 検索<br/>（Tavily / DuckDuckGo）"]
+    D --> F["<b>3-8</b><br/>LangChain Tool<br/>（宣言的なツール定義）"]
+    C --> G["<b>3-11</b><br/>Text-to-SQL<br/>（自然言語 DB 検索）"]
+
+    style A fill:#e3f2fd
+    style B fill:#e3f2fd
+    style C fill:#e3f2fd
+    style D fill:#fff3e0
+    style E fill:#fff3e0
+    style F fill:#fff3e0
+    style G fill:#fff3e0
+```
 
 :::info 前提条件
 
 - 環境変数 `OPENAI_API_KEY` に OpenAI の API キーが設定されていること
 - 3-7 のみ、環境変数 `TAVILY_API_KEY` に Tavily の API キーが設定されていること
+- 3-11 のみ、`better-sqlite3` パッケージがインストールされていること（`pnpm install` で自動インストール）
 
 :::
 
@@ -230,6 +242,10 @@ JSON モードではスキーマの遵守が保証されませんでしたが、
 内部的には、モデルが次のトークン（単語の断片）を選ぶ際の確率分布を調整しています。`temperature` が低いほど確率の高いトークンが選ばれやすくなり、高いほど確率の低いトークンも選ばれる可能性が増します。
 
 このサンプルでは `temperature: 0` を指定しているため、毎回ほぼ同じレシピが生成されます。レシピの構造化データを安定して取得したい場合に適した設定です。
+
+:::tip create() と parse() の違い
+3-1 や 3-3 では `client.chat.completions.create()` を使いましたが、Structured Outputs では `client.chat.completions.parse()` を使います。`parse()` は OpenAI SDK が提供する拡張メソッドで、レスポンスの `message.parsed` プロパティから Zod スキーマに基づいた**型付きオブジェクト**を直接取得できます。`create()` では `message.content` が文字列として返されるため、手動で `JSON.parse()` する必要があります。
+:::
 
 ```typescript title="chapter3/test3-4-structured-outputs.ts"
 import OpenAI from "openai";
@@ -589,6 +605,10 @@ LangChain の Tool は、AI エージェントが外部の機能を呼び出す�
 | `schema` | Zod スキーマで定義する引数の型とバリデーション |
 | 関数本体 | 実際に実行される処理（非同期関数） |
 
+:::info Zod のバージョンについて
+このサンプルでは `import { z } from "zod"` としていますが、3-4 や 3-11 では `import { z } from "zod/v4"` を使っています。これは LangChain が Zod v3 系 API を前提としているためです。OpenAI SDK の `zodResponseFormat` は Zod v4 のエントリポイント（`zod/v4`）に対応しています。同じプロジェクト内で両方を使う場合は、インポートパスに注意してください。
+:::
+
 ### サンプルで行うこと
 
 このサンプルでは以下を行います。
@@ -784,6 +804,345 @@ HTMLコンテンツの最初の部分:
 <!DOCTYPE html><html lang="ja">...
 ```
 
+## 3-11. Text-to-SQL による自然言語 DB 検索
+
+3-6 の Function Calling では天気取得というシンプルなツールを実装しましたが、実際のアプリケーションではもっと複雑なデータソースとの連携が求められます。ここでは、**自然言語の質問を SQL クエリに変換してデータベース検索を行う「Text-to-SQL」ツール** を実装します。
+3-4 で学んだ Structured Outputs を活用し、LLM が生成する SQL を型安全に取得するのがポイントです。
+
+### Text-to-SQL とは？
+
+Text-to-SQL は、ユーザーが自然言語で入力した質問を SQL クエリに自動変換し、データベースから情報を取得する技術です。AI エージェントのツールとして組み込むことで、ユーザーは SQL を知らなくてもデータベースを検索できるようになります。
+
+### Text-to-SQL の処理フロー
+
+このサンプルでは以下の流れで処理を行います。
+
+1. **データベース初期化** - インメモリ SQLite データベースに `employees` テーブルを作成し、サンプルデータを投入
+2. **スキーマ情報の抽出** - テーブル定義とサンプルデータを取得し、LLM のコンテキストとして利用
+3. **SQL 生成（Structured Outputs）** - 自然言語のキーワードを元に、LLM が SQL クエリを Zod スキーマに準拠した形式で生成
+4. **安全性チェック** - 生成された SQL が `SELECT` クエリであることを確認（INSERT / UPDATE / DELETE を拒否）
+5. **SQL 実行と結果フォーマット** - 生成された SQL を実行し、結果をテーブル形式の文字列で返却
+
+```mermaid
+sequenceDiagram
+    participant User as ユーザー
+    participant App as textToSqlSearch 関数
+    participant DB as SQLite DB
+    participant LLM as OpenAI モデル
+
+    User->>App: 「employeeテーブルの情報は何件ありますか？」
+    App->>DB: スキーマ情報を取得
+    DB-->>App: CREATE TABLE employees (...) + サンプルデータ
+    App->>LLM: スキーマ + 自然言語クエリを送信<br/>（Structured Outputs で SQL を要求）
+    LLM-->>App: { sql: "SELECT COUNT(*) ...", explanation: "..." }
+    App->>App: 安全性チェック（SELECT のみ許可）
+    App->>DB: 生成された SQL を実行
+    DB-->>App: クエリ結果
+    App-->>User: フォーマットされた結果を返却
+```
+
+### 既存テクニックとの関連
+
+このサンプルでは、これまでの章で学んだ複数のテクニックを組み合わせています。
+
+| 使用テクニック | セクション | 本サンプルでの活用 |
+| --- | --- | --- |
+| Structured Outputs | 3-4 | Zod スキーマで SQL クエリと説明を型安全に取得 |
+| system ロール | 3-1 | SQL 専門家としてのプロンプト設定 |
+| temperature: 0 | 3-4 | 安定した SQL 生成のためのパラメータ設定 |
+
+### 実装のポイント
+
+このサンプルでは以下を行います。
+
+- `better-sqlite3` でインメモリ SQLite データベースを構築し、従業員データを投入
+- データベースのスキーマ情報（テーブル定義 + サンプルデータ 3 行）を自動抽出して LLM に提供
+- Zod スキーマ（`sql` と `explanation`）を使った Structured Outputs で SQL クエリを生成
+- 安全性チェックにより `SELECT` 以外のクエリを拒否
+- 生成された SQL を実行し、結果をマークダウン風テーブル形式でフォーマット
+
+```typescript title="chapter3/test3-11-text-to-sql.ts"
+import Database from 'better-sqlite3';
+import OpenAI from 'openai';
+import { zodResponseFormat } from 'openai/helpers/zod';
+import { z } from 'zod/v4';
+
+// --- Zodスキーマ: LLMの構造化出力用 ---
+const SQLQuery = z.object({
+  sql: z.string().describe('実行するSQLクエリ'),
+  explanation: z.string().describe('クエリの簡単な説明'),
+});
+
+// --- データベース初期化 ---
+function initializeDatabase(): Database.Database {
+  const db = new Database(':memory:');
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS employees (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      department TEXT,
+      salary INTEGER,
+      hire_date TEXT
+    )
+  `);
+
+  const insert = db.prepare(
+    'INSERT INTO employees (name, department, salary, hire_date) VALUES (?, ?, ?, ?)',
+  );
+
+  const insertMany = db.transaction(
+    (rows: Array<[string, string, number, string]>) => {
+      for (const row of rows) {
+        insert.run(...row);
+      }
+    },
+  );
+
+  insertMany([
+    ['Tanaka Taro', 'IT', 600000, '2020-04-01'],
+    ['Yamada Hanako', 'HR', 550000, '2019-03-15'],
+    ['Suzuki Ichiro', 'Finance', 700000, '2021-01-20'],
+    ['Watanabe Yuki', 'IT', 650000, '2020-07-10'],
+    ['Kato Akira', 'Marketing', 580000, '2022-02-01'],
+    ['Nakamura Yui', 'IT', 620000, '2021-05-15'],
+    ['Yoshida Saki', 'Finance', 680000, '2020-12-01'],
+    ['Matsumoto Ryu', 'HR', 540000, '2022-08-20'],
+    ['Inoue Kana', 'Marketing', 590000, '2021-11-10'],
+    ['Takahashi Ken', 'IT', 710000, '2019-09-05'],
+  ]);
+
+  return db;
+}
+
+// --- スキーマ情報の取得 ---
+function getSchemaInfo(db: Database.Database): string {
+  const tables = db
+    .prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+    )
+    .all() as Array<{ name: string }>;
+
+  const schemaLines: string[] = [];
+
+  for (const table of tables) {
+    const columns = db
+      .prepare(`PRAGMA table_info('${table.name}')`)
+      .all() as Array<{
+      cid: number;
+      name: string;
+      type: string;
+      notnull: number;
+      dflt_value: string | null;
+      pk: number;
+    }>;
+
+    const columnDefs = columns
+      .map((col) => {
+        const parts = [col.name, col.type];
+        if (col.pk) parts.push('PRIMARY KEY');
+        if (col.notnull) parts.push('NOT NULL');
+        return parts.join(' ');
+      })
+      .join(', ');
+
+    schemaLines.push(`CREATE TABLE ${table.name} (${columnDefs})`);
+
+    // サンプルデータ（3行）をLLMのコンテキストとして追加
+    const sampleRows = db
+      .prepare(`SELECT * FROM "${table.name}" LIMIT 3`)
+      .all();
+    if (sampleRows.length > 0) {
+      schemaLines.push(`/* Sample rows from ${table.name}: */`);
+      schemaLines.push(`/* ${JSON.stringify(sampleRows)} */`);
+    }
+  }
+
+  return schemaLines.join('\n');
+}
+
+// --- OpenAIでSQL生成 ---
+async function generateSQL(
+  client: OpenAI,
+  schema: string,
+  keywords: string,
+): Promise<z.infer<typeof SQLQuery>> {
+  const response = await client.chat.completions.parse({
+    model: 'gpt-4o-mini',
+    temperature: 0,
+    messages: [
+      {
+        role: 'system',
+        content: `あなたはSQLの専門家です。以下のSQLiteデータベーススキーマに基づいて、ユーザーの自然言語リクエストからSQLクエリを生成してください。
+
+データベーススキーマ:
+${schema}
+
+ルール:
+- 有効なSQLite SQL構文を生成すること
+- SELECTクエリのみ生成すること（INSERT, UPDATE, DELETE, DROPなどは不可）
+- PostgreSQL固有の構文は使用しないこと
+- 上記のスキーマに対してそのまま実行可能なクエリを生成すること`,
+      },
+      {
+        role: 'user',
+        content: keywords,
+      },
+    ],
+    response_format: zodResponseFormat(SQLQuery, 'sql_query'),
+  });
+
+  const parsed = response.choices[0]?.message.parsed;
+  if (!parsed) {
+    const refusal = response.choices[0]?.message.refusal;
+    if (refusal) {
+      throw new Error(`LLMがリクエストを拒否しました: ${refusal}`);
+    }
+    throw new Error('LLMからの構造化出力のパースに失敗しました');
+  }
+  return parsed;
+}
+
+// --- SQL実行 ---
+function executeQuery(
+  db: Database.Database,
+  sql: string,
+): { columns: string[]; rows: unknown[][] } {
+  // 安全性チェック: SELECTクエリのみ許可
+  const normalized = sql.trim().toUpperCase();
+  if (!normalized.startsWith('SELECT')) {
+    throw new Error(
+      `安全性チェック: SELECTクエリのみ許可されています。受信: ${sql.substring(0, 50)}...`,
+    );
+  }
+
+  const rows = db.prepare(sql).all() as Array<Record<string, unknown>>;
+
+  if (rows.length === 0) {
+    return { columns: [], rows: [] };
+  }
+
+  const columns = Object.keys(rows[0]!);
+  const rowArrays = rows.map((row) => columns.map((col) => row[col]));
+
+  return { columns, rows: rowArrays };
+}
+
+// --- 結果フォーマット ---
+function formatResults(columns: string[], rows: unknown[][]): string {
+  if (rows.length === 0) {
+    return '結果が見つかりませんでした。';
+  }
+
+  const header = columns.join(' | ');
+  const separator = columns.map(() => '---').join(' | ');
+  const dataRows = rows.map((row) => row.map(String).join(' | '));
+
+  return [header, separator, ...dataRows].join('\n');
+}
+
+// --- text_to_sql_search ツール関数 ---
+/**
+ * 自然言語でのクエリをSQLクエリに変換し、SQLデータベースで検索を実行します。
+ *
+ * 機能:
+ * - このToolは、与えられた自然言語形式のキーワードをもとに、SQLクエリを生成します。
+ * - LLMを使用してSQL文を生成し、インメモリSQLiteデータベースで検索を実行します。
+ * - 取得した検索結果を返します。
+ *
+ * @param keywords - 実行したいクエリの自然言語キーワード
+ *   例: "employeeテーブルの情報は何件ありますか？"
+ * @returns データベース検索結果の文字列
+ */
+async function textToSqlSearch(keywords: string): Promise<string> {
+  try {
+    const client = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    });
+
+    const db = initializeDatabase();
+
+    try {
+      const schema = getSchemaInfo(db);
+      console.log('Database Schema:\n', schema, '\n');
+
+      console.log('Query:', keywords);
+      const { sql, explanation } = await generateSQL(client, schema, keywords);
+      console.log('Generated SQL:', sql);
+      console.log('Explanation:', explanation);
+
+      const { columns, rows } = executeQuery(db, sql);
+
+      const result = formatResults(columns, rows);
+      console.log('\nResults:');
+      console.log(result);
+
+      return result;
+    } finally {
+      db.close();
+    }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.error(`エラー: ${message}`);
+    return `エラー: ${message}`;
+  }
+}
+
+// --- 実行例 ---
+const args = { keywords: 'employeeテーブルの情報は何件ありますか？' };
+await textToSqlSearch(args.keywords);
+```
+
+**実行方法:**
+
+```bash
+pnpm tsx chapter3/test3-11-text-to-sql.ts
+```
+
+**実行結果の例:**
+
+```text
+Database Schema:
+ CREATE TABLE employees (id INTEGER PRIMARY KEY, name TEXT NOT NULL, department TEXT, salary INTEGER, hire_date TEXT)
+/* Sample rows from employees: */
+/* [{"id":1,"name":"Tanaka Taro","department":"IT","salary":600000,"hire_date":"2020-04-01"},{"id":2,"name":"Yamada Hanako","department":"HR","salary":550000,"hire_date":"2019-03-15"},{"id":3,"name":"Suzuki Ichiro","department":"Finance","salary":700000,"hire_date":"2021-01-20"}] */
+
+Query: employeeテーブルの情報は何件ありますか？
+Generated SQL: SELECT COUNT(*) AS employee_count FROM employees
+Explanation: employeesテーブルの全レコード数を取得するクエリです。
+
+Results:
+employee_count
+---
+10
+```
+
+:::tip LLM にスキーマ情報を渡すコツ
+このサンプルでは、テーブル定義（`CREATE TABLE ...`）だけでなく、サンプルデータ（3 行）も LLM に渡しています。これにより、LLM はカラムに格納されるデータの形式（日付のフォーマット、部署名の種類など）を理解し、より正確な SQL を生成できます。
+:::
+
+:::caution 安全性について
+このサンプルでは `SELECT` クエリのみを許可する簡易的な安全性チェックを実装していますが、本番環境では以下の追加対策を検討してください。
+
+- パラメータ化クエリの使用（SQL インジェクション対策）
+- 読み取り専用のデータベース接続の使用
+- クエリのタイムアウト設定
+- 取得行数の制限
+
+:::
+
+## まとめ
+
+この章では、AI エージェントを構築するために必要な OpenAI API の基本操作を、段階的に学びました。
+
+| カテゴリ | セクション | 学んだこと |
+| --- | --- | --- |
+| **入出力の基礎** | 3-1, 3-3, 3-4 | テキスト → JSON → スキーマ準拠 JSON と、出力の構造化レベルを段階的に引き上げる方法 |
+| **ツール連携** | 3-6, 3-8 | Function Calling による外部関数の呼び出しと、LangChain による宣言的なツール定義 |
+| **実践的なツール** | 3-7, 3-9, 3-11 | Web 検索（Tavily / DuckDuckGo）やデータベース検索（Text-to-SQL）など、エージェントが活用する具体的なツールの実装 |
+
+これらの要素は、次章以降で構築する AI エージェントの土台となります。特に **Function Calling**（3-6）と **Structured Outputs**（3-4）は、エージェントがツールを呼び出し、その結果を構造化データとして扱うための中核的な仕組みであり、今後も繰り返し登場します。
+
 ---
 
 ## 参考文献
@@ -791,9 +1150,10 @@ HTMLコンテンツの最初の部分:
 - OpenAI. [Chat Completions API](https://platform.openai.com/docs/guides/text-generation) - Chat Completions API の公式ガイド（3-1）
 - OpenAI. [Structured Outputs](https://platform.openai.com/docs/guides/structured-outputs) - JSON モードおよび Structured Outputs の公式ドキュメント（3-3, 3-4）
 - OpenAI. [Function Calling](https://platform.openai.com/docs/guides/function-calling) - Function Calling の公式ドキュメント（3-6）
-- [openai (npm)](https://www.npmjs.com/package/openai) - OpenAI 公式 Node.js / TypeScript SDK（3-1, 3-3, 3-4, 3-6）
-- [Zod](https://zod.dev/) - TypeScript ファーストのスキーマバリデーションライブラリ（3-4, 3-8）
+- [openai (npm)](https://www.npmjs.com/package/openai) - OpenAI 公式 Node.js / TypeScript SDK（3-1, 3-3, 3-4, 3-6, 3-11）
+- [Zod](https://zod.dev/) - TypeScript ファーストのスキーマバリデーションライブラリ（3-4, 3-8, 3-11）
 - [Tavily](https://docs.tavily.com/) - AI エージェント向け Web 検索 API の公式ドキュメント（3-7）
 - [LangChain Tools](https://js.langchain.com/docs/how_to/custom_tools/) - LangChain カスタム Tool の公式ドキュメント（3-8）
 - [duck-duck-scrape](https://www.npmjs.com/package/duck-duck-scrape) - DuckDuckGo 検索結果を取得する npm パッケージ（3-9）
 - [cheerio](https://www.npmjs.com/package/cheerio) - サーバーサイドで HTML をパース・操作するための軽量ライブラリ（3-9 の補足）
+- [better-sqlite3](https://www.npmjs.com/package/better-sqlite3) - Node.js 向けの高速な SQLite3 ライブラリ（3-11）

@@ -12,12 +12,14 @@
   "license": "ISC",
   "dependencies": {
     "@tavily/core": "^0.7.1",
+    "better-sqlite3": "^12.6.2",
     "duck-duck-scrape": "^2.2.7",
     "langchain": "^1.2.19",
     "openai": "^6.17.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.1.0",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3"
