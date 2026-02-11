@@ -44,6 +44,218 @@ html {
   background: #0f172a;
 }
 
+/* ---- Navbar styles ---- */
+
+/* Glass morphism navbar */
+.navbar {
+  background: rgba(10, 14, 26, 0.8);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  border-bottom: none;
+  box-shadow: none;
+  padding: 0.6rem 1.5rem;
+  --ifm-navbar-background-color: transparent;
+  --ifm-navbar-height: 4rem;
+}
+
+/* Animated gradient accent line at the bottom */
+.navbar::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(59, 130, 246, 0.4) 20%,
+    rgba(139, 92, 246, 0.6) 50%,
+    rgba(6, 182, 212, 0.4) 80%,
+    transparent 100%
+  );
+}
+
+[data-theme="light"] .navbar {
+  background: rgba(255, 255, 255, 0.8);
+}
+
+[data-theme="light"] .navbar::after {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(46, 134, 222, 0.3) 20%,
+    rgba(139, 92, 246, 0.4) 50%,
+    rgba(6, 182, 212, 0.3) 80%,
+    transparent 100%
+  );
+}
+
+/* Navbar title */
+.navbar__title {
+  font-weight: 700;
+  font-size: 0.95rem;
+  letter-spacing: -0.01em;
+  color: #f1f5f9;
+  transition: color 0.2s ease;
+}
+
+.navbar__brand:hover .navbar__title {
+  color: #ffffff;
+}
+
+[data-theme="light"] .navbar__title {
+  color: #1e293b;
+}
+
+[data-theme="light"] .navbar__brand:hover .navbar__title {
+  color: #0f172a;
+}
+
+/* Navbar logo */
+.navbar__logo img {
+  border-radius: 8px;
+  transition: all 0.3s ease;
+  box-shadow: 0 0 0 0 rgba(59, 130, 246, 0);
+}
+
+.navbar__brand:hover .navbar__logo img {
+  transform: scale(1.08);
+  box-shadow: 0 0 12px rgba(59, 130, 246, 0.3);
+}
+
+[data-theme="light"] .navbar__brand:hover .navbar__logo img {
+  box-shadow: 0 0 12px rgba(46, 134, 222, 0.2);
+}
+
+/* Navbar items - separator between brand and links */
+.navbar__items:first-child .navbar__item:not(.navbar__brand):first-of-type {
+  margin-left: 1rem;
+  padding-left: 1rem;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="light"] .navbar__items:first-child .navbar__item:not(.navbar__brand):first-of-type {
+  border-left-color: rgba(0, 0, 0, 0.08);
+}
+
+/* Navbar links */
+.navbar__link {
+  font-weight: 600;
+  font-size: 0.875rem;
+  letter-spacing: 0.01em;
+  padding: 6px 14px;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+  color: rgba(255, 255, 255, 0.6);
+  position: relative;
+}
+
+[data-theme="light"] .navbar__link {
+  color: #64748b;
+}
+
+.navbar__link:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #ffffff;
+}
+
+[data-theme="light"] .navbar__link:hover {
+  background: rgba(46, 134, 222, 0.06);
+  color: #2e86de;
+}
+
+.navbar__link--active {
+  color: #93c5fd;
+  background: rgba(59, 130, 246, 0.08);
+}
+
+[data-theme="light"] .navbar__link--active {
+  color: #2e86de;
+  background: rgba(46, 134, 222, 0.06);
+}
+
+/* Active link bottom indicator */
+.navbar__link--active::after {
+  content: "";
+  position: absolute;
+  bottom: -2px;
+  left: 25%;
+  right: 25%;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #3b82f6, #8b5cf6);
+}
+
+[data-theme="light"] .navbar__link--active::after {
+  background: linear-gradient(90deg, #2e86de, #7c3aed);
+}
+
+/* GitHub link as pill */
+.navbar__item[href*="github.com"] {
+  font-size: 0.8rem;
+  padding: 5px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  transition: all 0.25s ease;
+  margin-right: 8px;
+}
+
+.navbar__item[href*="github.com"]:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+  box-shadow: 0 0 16px rgba(59, 130, 246, 0.15);
+}
+
+[data-theme="light"] .navbar__item[href*="github.com"] {
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: rgba(0, 0, 0, 0.02);
+}
+
+[data-theme="light"] .navbar__item[href*="github.com"]:hover {
+  background: rgba(46, 134, 222, 0.06);
+  border-color: rgba(46, 134, 222, 0.2);
+  color: #2e86de;
+  box-shadow: 0 0 16px rgba(46, 134, 222, 0.1);
+}
+
+/* Theme toggle button */
+[class*="toggle_"] button,
+[class*="colorModeToggle"] button {
+  border-radius: 8px;
+  transition: all 0.2s ease;
+}
+
+[class*="toggle_"] button:hover,
+[class*="colorModeToggle"] button:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+[data-theme="light"] [class*="toggle_"] button:hover,
+[data-theme="light"] [class*="colorModeToggle"] button:hover {
+  background: rgba(46, 134, 222, 0.06);
+}
+
+/* Navbar sidebar (mobile) */
+.navbar-sidebar {
+  background: rgba(10, 14, 26, 0.95);
+  backdrop-filter: blur(20px);
+}
+
+[data-theme="light"] .navbar-sidebar {
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.navbar-sidebar__brand {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+[data-theme="light"] .navbar-sidebar__brand {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+
 /* ---- Mermaid diagram styles ---- */
 
 /* Light mode: node styling */
