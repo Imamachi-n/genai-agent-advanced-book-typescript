@@ -11,6 +11,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@langchain/openai": "^1.2.7",
     "@tavily/core": "^0.7.1",
     "better-sqlite3": "^12.6.2",
     "duck-duck-scrape": "^2.2.7",

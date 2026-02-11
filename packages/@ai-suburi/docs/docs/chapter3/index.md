@@ -16,6 +16,7 @@ sidebar_position: 1
 - **LangChain** の `tool` ヘルパーによるカスタム Tool 定義
 - **DuckDuckGo** を使った無料の Web 検索とページ取得
 - **Text-to-SQL** による自然言語からの SQL クエリ生成と検索
+- **LangChain** による Text-to-SQL の簡素化（`ChatPromptTemplate` + `withStructuredOutput`）
 
 :::
 
@@ -33,6 +34,7 @@ flowchart LR
     D --> E["<b>3-7 / 3-9</b><br/>Web 検索<br/>（Tavily / DuckDuckGo）"]
     D --> F["<b>3-8</b><br/>LangChain Tool<br/>（宣言的なツール定義）"]
     C --> G["<b>3-11</b><br/>Text-to-SQL<br/>（自然言語 DB 検索）"]
+    G --> H["<b>3-12</b><br/>Text-to-SQL<br/>（LangChain 版）"]
 
     style A fill:#e3f2fd
     style B fill:#e3f2fd
@@ -41,6 +43,7 @@ flowchart LR
     style E fill:#fff3e0
     style F fill:#fff3e0
     style G fill:#fff3e0
+    style H fill:#e8f5e9
 ```
 
 :::info 前提条件
@@ -48,6 +51,7 @@ flowchart LR
 - 環境変数 `OPENAI_API_KEY` に OpenAI の API キーが設定されていること
 - 3-7 のみ、環境変数 `TAVILY_API_KEY` に Tavily の API キーが設定されていること
 - 3-11 のみ、`better-sqlite3` パッケージがインストールされていること（`pnpm install` で自動インストール）
+- 3-12 のみ、`@langchain/openai` パッケージが追加で必要（`pnpm install` で自動インストール）
 
 :::
 
@@ -1131,6 +1135,287 @@ employee_count
 
 :::
 
+## 3-12. Text-to-SQL（LangChain 版）
+
+3-11 では OpenAI SDK を直接使って Text-to-SQL を実装しましたが、LLM の呼び出し部分にはボイラープレートコード（レスポンスのパース処理、refusal チェック、messages 配列の手動構築など）が多く含まれていました。
+ここでは、LangChain の `ChatOpenAI` + `ChatPromptTemplate` + `withStructuredOutput()` を使って、同じ機能をより簡潔に実装します。
+
+### OpenAI SDK 版（3-11）との比較
+
+| 項目 | OpenAI SDK（3-11） | LangChain（3-12） |
+| --- | --- | --- |
+| LLM クライアント | `new OpenAI()` | `new ChatOpenAI()` |
+| プロンプト構築 | `messages` 配列を手動構築 | `ChatPromptTemplate.fromMessages()` でテンプレート化 |
+| 構造化出力の指定 | `zodResponseFormat()` + `parse()` | `.withStructuredOutput(ZodSchema)` |
+| レスポンス処理 | `message.parsed` の null チェック + refusal チェック | `chain.invoke()` の戻り値がそのまま型付きオブジェクト |
+| 処理の合成 | 各ステップを手動で連結 | `prompt.pipe(structuredLlm)` でチェーンとして合成 |
+
+### LangChain による簡素化のポイント
+
+LangChain を使うことで、SQL 生成の中核部分が大幅に簡素化されます。
+
+**OpenAI SDK 版（3-11）では `generateSQL` 関数として約 30 行のコード** が必要でしたが、**LangChain 版では以下の 3 ステップに集約** されます。
+
+1. **`ChatPromptTemplate.fromMessages()`** - system / human メッセージをテンプレート変数（`{schema}`, `{keywords}`）付きで定義
+2. **`llm.withStructuredOutput(SQLQuery)`** - Zod スキーマを渡すだけで、LLM の出力が自動的にパース・バリデーションされる
+3. **`prompt.pipe(structuredLlm)`** - プロンプトと構造化 LLM をチェーンとして合成し、`invoke()` で実行
+
+これにより、refusal チェックや null チェック、`zodResponseFormat` の設定といったボイラープレートが不要になります。
+
+### LangChain 版の実装内容
+
+このサンプルでは以下を行います。
+
+- `ChatOpenAI` + `ChatPromptTemplate` + `withStructuredOutput()` を使った SQL 生成チェーンの構築
+- `prompt.pipe(structuredLlm)` によるプロンプトと LLM のチェーン合成
+- `chain.invoke()` による型安全な構造化出力の取得
+- データベース周りの処理（初期化・スキーマ抽出・SQL 実行）は 3-11 と同一
+
+```typescript title="chapter3/test3-11-text-to-sql-langchain.ts"
+import Database from 'better-sqlite3';
+import { ChatOpenAI } from '@langchain/openai';
+import { ChatPromptTemplate } from '@langchain/core/prompts';
+import { z } from 'zod/v4';
+
+// --- Zodスキーマ: LLMの構造化出力用 ---
+const SQLQuery = z.object({
+  sql: z.string().describe('実行するSQLクエリ'),
+  explanation: z.string().describe('クエリの簡単な説明'),
+});
+
+// --- データベース初期化 ---
+function initializeDatabase(): Database.Database {
+  const db = new Database(':memory:');
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS employees (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      department TEXT,
+      salary INTEGER,
+      hire_date TEXT
+    )
+  `);
+
+  const insert = db.prepare(
+    'INSERT INTO employees (name, department, salary, hire_date) VALUES (?, ?, ?, ?)',
+  );
+
+  const insertMany = db.transaction(
+    (rows: Array<[string, string, number, string]>) => {
+      for (const row of rows) {
+        insert.run(...row);
+      }
+    },
+  );
+
+  insertMany([
+    ['Tanaka Taro', 'IT', 600000, '2020-04-01'],
+    ['Yamada Hanako', 'HR', 550000, '2019-03-15'],
+    ['Suzuki Ichiro', 'Finance', 700000, '2021-01-20'],
+    ['Watanabe Yuki', 'IT', 650000, '2020-07-10'],
+    ['Kato Akira', 'Marketing', 580000, '2022-02-01'],
+    ['Nakamura Yui', 'IT', 620000, '2021-05-15'],
+    ['Yoshida Saki', 'Finance', 680000, '2020-12-01'],
+    ['Matsumoto Ryu', 'HR', 540000, '2022-08-20'],
+    ['Inoue Kana', 'Marketing', 590000, '2021-11-10'],
+    ['Takahashi Ken', 'IT', 710000, '2019-09-05'],
+  ]);
+
+  return db;
+}
+
+// --- スキーマ情報の取得 ---
+function getSchemaInfo(db: Database.Database): string {
+  const tables = db
+    .prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+    )
+    .all() as Array<{ name: string }>;
+
+  const schemaLines: string[] = [];
+
+  for (const table of tables) {
+    const columns = db
+      .prepare(`PRAGMA table_info('${table.name}')`)
+      .all() as Array<{
+      cid: number;
+      name: string;
+      type: string;
+      notnull: number;
+      dflt_value: string | null;
+      pk: number;
+    }>;
+
+    const columnDefs = columns
+      .map((col) => {
+        const parts = [col.name, col.type];
+        if (col.pk) parts.push('PRIMARY KEY');
+        if (col.notnull) parts.push('NOT NULL');
+        return parts.join(' ');
+      })
+      .join(', ');
+
+    schemaLines.push(`CREATE TABLE ${table.name} (${columnDefs})`);
+
+    const sampleRows = db
+      .prepare(`SELECT * FROM "${table.name}" LIMIT 3`)
+      .all();
+    if (sampleRows.length > 0) {
+      schemaLines.push(`/* Sample rows from ${table.name}: */`);
+      schemaLines.push(`/* ${JSON.stringify(sampleRows)} */`);
+    }
+  }
+
+  return schemaLines.join('\n');
+}
+
+// --- SQL実行 ---
+function executeQuery(
+  db: Database.Database,
+  sql: string,
+): { columns: string[]; rows: unknown[][] } {
+  const normalized = sql.trim().toUpperCase();
+  if (!normalized.startsWith('SELECT')) {
+    throw new Error(
+      `安全性チェック: SELECTクエリのみ許可されています。受信: ${sql.substring(0, 50)}...`,
+    );
+  }
+
+  const rows = db.prepare(sql).all() as Array<Record<string, unknown>>;
+
+  if (rows.length === 0) {
+    return { columns: [], rows: [] };
+  }
+
+  const columns = Object.keys(rows[0]!);
+  const rowArrays = rows.map((row) => columns.map((col) => row[col]));
+
+  return { columns, rows: rowArrays };
+}
+
+// --- 結果フォーマット ---
+function formatResults(columns: string[], rows: unknown[][]): string {
+  if (rows.length === 0) {
+    return '結果が見つかりませんでした。';
+  }
+
+  const header = columns.join(' | ');
+  const separator = columns.map(() => '---').join(' | ');
+  const dataRows = rows.map((row) => row.map(String).join(' | '));
+
+  return [header, separator, ...dataRows].join('\n');
+}
+
+// --- LangChainでSQL生成チェーンを構築 ---
+function createSqlGenerationChain() {
+  const llm = new ChatOpenAI({
+    model: 'gpt-4o-mini',
+    temperature: 0,
+  });
+
+  const prompt = ChatPromptTemplate.fromMessages([
+    [
+      'system',
+      `あなたはSQLの専門家です。以下のSQLiteデータベーススキーマに基づいて、ユーザーの自然言語リクエストからSQLクエリを生成してください。
+
+データベーススキーマ:
+{schema}
+
+ルール:
+- 有効なSQLite SQL構文を生成すること
+- SELECTクエリのみ生成すること（INSERT, UPDATE, DELETE, DROPなどは不可）
+- PostgreSQL固有の構文は使用しないこと
+- 上記のスキーマに対してそのまま実行可能なクエリを生成すること`,
+    ],
+    ['human', '{keywords}'],
+  ]);
+
+  // withStructuredOutput で Zod スキーマに基づいた構造化出力を取得
+  const structuredLlm = llm.withStructuredOutput(SQLQuery);
+
+  return prompt.pipe(structuredLlm);
+}
+
+// --- text_to_sql_search ツール関数 ---
+async function textToSqlSearch(keywords: string): Promise<string> {
+  try {
+    const db = initializeDatabase();
+
+    try {
+      const schema = getSchemaInfo(db);
+      console.log('Database Schema:\n', schema, '\n');
+
+      console.log('Query:', keywords);
+
+      // LangChain チェーンでSQL生成
+      const chain = createSqlGenerationChain();
+      const { sql, explanation } = await chain.invoke({ schema, keywords });
+      console.log('Generated SQL:', sql);
+      console.log('Explanation:', explanation);
+
+      const { columns, rows } = executeQuery(db, sql);
+
+      const result = formatResults(columns, rows);
+      console.log('\nResults:');
+      console.log(result);
+
+      return result;
+    } finally {
+      db.close();
+    }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.error(`エラー: ${message}`);
+    return `エラー: ${message}`;
+  }
+}
+
+// --- 実行例 ---
+const args = { keywords: 'employeeテーブルの情報は何件ありますか？' };
+await textToSqlSearch(args.keywords);
+```
+
+**実行方法:**
+
+```bash
+pnpm tsx chapter3/test3-11-text-to-sql-langchain.ts
+```
+
+**実行結果の例:**
+
+```text
+Database Schema:
+ CREATE TABLE employees (id INTEGER PRIMARY KEY, name TEXT NOT NULL, department TEXT, salary INTEGER, hire_date TEXT)
+/* Sample rows from employees: */
+/* [{"id":1,"name":"Tanaka Taro","department":"IT","salary":600000,"hire_date":"2020-04-01"},{"id":2,"name":"Yamada Hanako","department":"HR","salary":550000,"hire_date":"2019-03-15"},{"id":3,"name":"Suzuki Ichiro","department":"Finance","salary":700000,"hire_date":"2021-01-20"}] */
+
+Query: employeeテーブルの情報は何件ありますか？
+Generated SQL: SELECT COUNT(*) AS employee_count FROM employees
+Explanation: employeesテーブルの全レコード数を取得するクエリです。
+
+Results:
+employee_count
+---
+10
+```
+
+:::tip LangChain のチェーン（LCEL）とは？
+このサンプルで使用している `prompt.pipe(structuredLlm)` は、LangChain の **LCEL（LangChain Expression Language）** と呼ばれるパターンです。`pipe()` メソッドで複数の処理ステップを連結し、データが順番に流れるパイプラインを構築します。Unix のパイプ（`|`）と同じ発想で、各ステップの出力が次のステップの入力になります。
+:::
+
+:::info withStructuredOutput と zodResponseFormat の違い
+3-11 の OpenAI SDK 版では `zodResponseFormat(SQLQuery, 'sql_query')` を `response_format` に渡し、レスポンスの `message.parsed` から手動で結果を取得していました。一方、LangChain の `withStructuredOutput(SQLQuery)` は Zod スキーマを渡すだけで、パース・バリデーション・エラーハンドリングをすべて内部で処理します。戻り値は直接型付きオブジェクトとして返されるため、null チェックや refusal チェックが不要になります。
+:::
+
+:::caution LangChain.js の SQL Database ユーティリティについて
+LangChain.js には `SqlDatabase` クラス（スキーマの自動抽出や `getTableInfo()` メソッドを提供）が存在しますが、これは [`@langchain/classic`](https://www.npmjs.com/package/@langchain/classic) パッケージに含まれており、公式の説明では **"Old abstractions from LangChain.js"** とレガシー扱いになっています。さらに、内部で [TypeORM](https://typeorm.io/) に依存しているため、導入するとプロジェクトの依存関係が大幅に増加します。
+
+一方、最新の `langchain` や `@langchain/community` パッケージには SQL Database ユーティリティが移植されていません（2025 年 5 月時点）。[公式ドキュメントの SQL Agent ガイド](https://docs.langchain.com/oss/javascript/langchain/sql-agent)でも依然として `@langchain/classic/sql_db` を使用しており、現状ではこれが唯一の選択肢です。
+
+このサンプルでは、レガシーパッケージへの依存を避けるため、スキーマ抽出は `better-sqlite3` を直接使って実装し、LangChain の活用は LLM 呼び出し部分（`ChatOpenAI` + `ChatPromptTemplate` + `withStructuredOutput`）に絞っています。
+:::
+
 ## まとめ
 
 この章では、AI エージェントを構築するために必要な OpenAI API の基本操作を、段階的に学びました。
@@ -1140,6 +1425,7 @@ employee_count
 | **入出力の基礎** | 3-1, 3-3, 3-4 | テキスト → JSON → スキーマ準拠 JSON と、出力の構造化レベルを段階的に引き上げる方法 |
 | **ツール連携** | 3-6, 3-8 | Function Calling による外部関数の呼び出しと、LangChain による宣言的なツール定義 |
 | **実践的なツール** | 3-7, 3-9, 3-11 | Web 検索（Tavily / DuckDuckGo）やデータベース検索（Text-to-SQL）など、エージェントが活用する具体的なツールの実装 |
+| **LangChain 活用** | 3-8, 3-12 | LangChain によるカスタム Tool 定義や、`ChatPromptTemplate` + `withStructuredOutput` を使った処理の簡素化 |
 
 これらの要素は、次章以降で構築する AI エージェントの土台となります。特に **Function Calling**（3-6）と **Structured Outputs**（3-4）は、エージェントがツールを呼び出し、その結果を構造化データとして扱うための中核的な仕組みであり、今後も繰り返し登場します。
 
@@ -1156,4 +1442,6 @@ employee_count
 - [LangChain Tools](https://js.langchain.com/docs/how_to/custom_tools/) - LangChain カスタム Tool の公式ドキュメント（3-8）
 - [duck-duck-scrape](https://www.npmjs.com/package/duck-duck-scrape) - DuckDuckGo 検索結果を取得する npm パッケージ（3-9）
 - [cheerio](https://www.npmjs.com/package/cheerio) - サーバーサイドで HTML をパース・操作するための軽量ライブラリ（3-9 の補足）
-- [better-sqlite3](https://www.npmjs.com/package/better-sqlite3) - Node.js 向けの高速な SQLite3 ライブラリ（3-11）
+- [better-sqlite3](https://www.npmjs.com/package/better-sqlite3) - Node.js 向けの高速な SQLite3 ライブラリ（3-11, 3-12）
+- [@langchain/openai](https://www.npmjs.com/package/@langchain/openai) - LangChain の OpenAI モデル統合パッケージ（3-12）
+- [LangChain LCEL](https://js.langchain.com/docs/concepts/lcel/) - LangChain Expression Language（チェーン合成）の公式ドキュメント（3-12）
