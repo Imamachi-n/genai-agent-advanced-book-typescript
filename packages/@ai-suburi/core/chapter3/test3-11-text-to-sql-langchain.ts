@@ -1,6 +1,6 @@
-import Database from 'better-sqlite3';
-import { ChatOpenAI } from '@langchain/openai';
 import { ChatPromptTemplate } from '@langchain/core/prompts';
+import { ChatOpenAI } from '@langchain/openai';
+import Database from 'better-sqlite3';
 import { z } from 'zod/v4';
 
 // --- Zodスキーマ: LLMの構造化出力用 ---
