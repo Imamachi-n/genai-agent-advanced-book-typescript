@@ -110,11 +110,11 @@ const config: Config = {
           items: [
             {
               label: 'Chapter 2: AIエージェントの構成',
-              to: '/docs/chapter2',
+              to: '/docs/ai-agent-practice/chapter2',
             },
             {
               label: 'Chapter 3: AIエージェントの開発準備',
-              to: '/docs/chapter3',
+              to: '/docs/ai-agent-practice/chapter3',
             },
           ],
         },

@@ -28,7 +28,7 @@ function HomepageHeader() {
         </h1>
         <p className={styles.heroSubtitle}>{siteConfig.tagline}</p>
         <div className={styles.buttons}>
-          <Link className={styles.heroButton} to="/docs/chapter2">
+          <Link className={styles.heroButton} to="/docs/ai-agent-practice/chapter2">
             ドキュメントを読む
             <span className={styles.heroArrow}>→</span>
           </Link>
