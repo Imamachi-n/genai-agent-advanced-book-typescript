@@ -299,7 +299,7 @@ flowchart TD
 :::
 
 :::note 次の章との関連
-ツールの具体的な実装（Function Calling や Tavily Search）については、[Chapter 3: AIエージェントの開発準備](../chapter3/index.md) で詳しく解説しています。
+ツールの具体的な実装（Function Calling や Tavily Search）については、[Chapter 3: AIエージェントの開発準備](./chapter3.md) で詳しく解説しています。
 :::
 
 ---
@@ -992,7 +992,7 @@ async function executeWithReflexion(
 
 実際にエージェントを構築する際には、すべてのコンポーネントを一度に実装する必要はありません。まずはプロフィール（システムプロンプト）とツール（Function Calling）から始め、必要に応じてメモリやプランニングの仕組みを追加していくのが現実的なアプローチです。
 
-次の [Chapter 3](../chapter3/index.md) では、これらの概念を踏まえて OpenAI API を使った開発準備と基本的な実装に進みます。
+次の [Chapter 3](./chapter3.md) では、これらの概念を踏まえて OpenAI API を使った開発準備と基本的な実装に進みます。
 
 ---
 
