@@ -106,7 +106,7 @@ const config: Config = {
       style: 'dark',
       links: [
         {
-          title: 'Docs',
+          title: 'AI エージェント実践入門',
           items: [
             {
               label: 'Chapter 2: AIエージェントの構成',
@@ -115,6 +115,15 @@ const config: Config = {
             {
               label: 'Chapter 3: AIエージェントの開発準備',
               to: '/docs/ai-agent-practice/chapter3',
+            },
+          ],
+        },
+        {
+          title: 'Amazon Bedrock AgentCore 入門',
+          items: [
+            {
+              label: 'Bedrock AgentCore とは？',
+              to: '/docs/bedrock-agentcore',
             },
           ],
         },
