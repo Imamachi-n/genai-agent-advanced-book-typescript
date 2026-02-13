@@ -12,6 +12,7 @@ sidebar_position: 2
 - **Chat Completions API** の基本的な呼び出し方とトークン使用量の確認
 - **Embeddings API** によるテキストのベクトル化とコサイン類似度の計算
 - **JSON モード**と **Structured Outputs** による構造化された出力の取得
+- **Responses API** による会話管理とマルチターン対話
 - **Function Calling** を使った外部ツールとの連携パターン
 - **Tavily API** を使った AI エージェント向けの Web 検索
 - **LangChain** の `tool` ヘルパーによるカスタム Tool 定義
@@ -33,6 +34,7 @@ flowchart LR
     A["<b>3-1</b><br/>Chat Completions API<br/>（基本の API 呼び出し）"] --> A2["<b>3-2</b><br/>Embeddings API<br/>（テキストのベクトル化）"]
     A --> B["<b>3-3</b><br/>JSON モード<br/>（出力を JSON に制約）"]
     B --> C["<b>3-4</b><br/>Structured Outputs<br/>（スキーマ準拠の出力）"]
+    A --> A5["<b>3-5</b><br/>Responses API<br/>（会話管理とマルチターン）"]
     C --> D["<b>3-6</b><br/>Function Calling<br/>（外部ツール連携）"]
     D --> E["<b>3-7 / 3-9</b><br/>Web 検索<br/>（Tavily / DuckDuckGo）"]
     D --> F["<b>3-8</b><br/>LangChain Tool<br/>（宣言的なツール定義）"]
@@ -44,6 +46,7 @@ flowchart LR
     style A2 fill:#e3f2fd
     style B fill:#e3f2fd
     style C fill:#e3f2fd
+    style A5 fill:#e3f2fd
     style D fill:#fff3e0
     style E fill:#fff3e0
     style F fill:#fff3e0
@@ -505,6 +508,186 @@ Servings: 2
 Ingredients: [ 'ひき肉 200g', 'レタス 2枚', 'トマト 1個', 'チーズ 適量', ... ]
 Steps: [ '1. ひき肉をフライパンで炒める', '2. タコスシーズニングを加える', ... ]
 ```
+
+## 3-5. Responses API
+
+3-1 の Chat Completions API では、1 回のリクエストごとに会話履歴を `messages` 配列としてアプリケーション側で管理し、毎回すべての履歴を送信する必要がありました。たとえば、ユーザーとの会話が 10 ターン続くと、11 回目のリクエストにはそれまでの 10 ターン分のメッセージをすべて含める必要があります。これは [Chapter 2](./chapter2.md) で解説した「短期メモリ」の管理をアプリケーション側で行っていることに相当します。
+
+Responses API は、OpenAI が新たに提供する**次世代の API** です。`previous_response_id` を指定するだけで、サーバー側に保存された過去の会話を自動的に引き継げるため、マルチターン（複数回のやりとりで文脈を維持する対話）をシンプルに実装できます。
+
+さらに、`instructions` パラメータでシステム指示をトップレベルに記述でき、Web 検索やファイル検索などの**ビルトインツール**（API に組み込まれた標準ツール）にも対応しています。
+
+:::info Responses API と Chat Completions API の関係
+Responses API は Chat Completions API を**置き換える**ものではなく、より高レベルな機能を提供する API です。Chat Completions API は引き続きサポートされますが、ビルトインツールや `previous_response_id` による会話管理などの新機能は Responses API でのみ利用可能です。新規プロジェクトでは Responses API の利用が推奨されています。
+:::
+
+### Chat Completions API（3-1）との比較
+
+| 項目 | Chat Completions API（3-1） | Responses API（3-5） |
+| --- | --- | --- |
+| 会話履歴の管理 | アプリケーション側で `messages` 配列を保持・送信 | `previous_response_id` でサーバー側の履歴を参照 |
+| システム指示 | `system` ロールのメッセージとして送信 | トップレベルの `instructions` パラメータで指定 |
+| 入力形式 | `messages` 配列（ロール + メッセージ） | `input`（文字列またはメッセージ配列） |
+| 応答の取得 | `response.choices[0].message.content` | `response.output_text` |
+| ビルトインツール | なし（Function Calling のみ） | Web 検索、ファイル検索、Code Interpreter などを `tools` で指定可能 |
+| 主なユースケース | シンプルな質問応答、単発の生成 | マルチターン対話、ビルトインツール連携 |
+
+3-6 以降で学ぶ Function Calling は、Responses API でも `tools` パラメータで利用できます。Responses API はこれらのツール連携機能を統合的に扱える設計になっています。
+
+### Responses API の主要パラメータ
+
+| パラメータ | 説明 |
+| --- | --- |
+| `model` | 使用するモデル（例: `gpt-4o`） |
+| `input` | ユーザーの入力。文字列またはメッセージ配列を指定可能 |
+| `instructions` | モデルへのシステム指示。Chat Completions API の `system` ロールに相当 |
+| `previous_response_id` | 前回のレスポンス ID を指定して会話を継続する |
+| `store` | `true` に設定すると、レスポンスをサーバー側に保存する（`previous_response_id` で参照するために必要） |
+| `tools` | 使用するツールの配列（`web_search`、`file_search`、`function` など） |
+
+### レスポンスオブジェクトの主要プロパティ
+
+`client.responses.create()` が返すレスポンスオブジェクトの主要なプロパティは以下のとおりです。
+
+| プロパティ | 説明 |
+| --- | --- |
+| `id` | レスポンスの一意な ID（例: `resp_abc123`）。`previous_response_id` で参照する際に使用 |
+| `output_text` | モデルが生成したテキスト応答。Chat Completions API の `choices[0].message.content` に相当 |
+| `status` | レスポンスの状態（`completed`、`failed`、`in_progress` など） |
+| `usage` | トークン使用量（`input_tokens`、`output_tokens`、`total_tokens`） |
+
+### Responses API の処理の流れ
+
+このサンプルでは以下の流れを実装しています。
+
+1. **最初のリクエスト** — `client.responses.create()` で `instructions` と `input` を送信し、`store: true` で保存
+2. **応答の取得** — `response.output_text` で応答テキストを取得
+3. **マルチターン** — `previous_response_id` に前回の `response.id` を指定して会話を継続
+4. **トークン使用量の確認** — `response.usage` で各リクエストのトークン消費量を確認
+
+```mermaid
+sequenceDiagram
+    participant User as ユーザー
+    participant App as アプリケーション
+    participant API as OpenAI API
+
+    User->>App: 「簡単なパスタのレシピを教えて」
+    App->>API: responses.create（input, instructions, store: true）
+    Note right of API: store: true で<br/>レスポンスを保存
+    API-->>App: response1（id, output_text）
+    App-->>User: レシピを表示
+
+    Note over App, API: マルチターン（previous_response_id で継続）
+
+    User->>App: 「合うサラダも教えて」
+    App->>API: responses.create（input, previous_response_id: response1.id）
+    Note right of API: response1 の会話履歴を<br/>自動的に引き継ぎ
+    API-->>App: response2（前の会話を踏まえた応答）
+    App-->>User: サラダのレシピを表示
+```
+
+このサンプルでは以下を行います。
+
+- `gpt-4o` モデルに `instructions`（システム指示）と `input`（ユーザーメッセージ）を送信
+- `store: true` でレスポンスをサーバー側に保存
+- `output_text` プロパティで応答テキストを取得
+- `previous_response_id` で 1 回目の会話を参照し、マルチターン対話を実現
+- `usage` プロパティでトークン使用量を確認
+
+```typescript title="chapter3/test3-5-responses-api.ts"
+import OpenAI from 'openai';
+
+// クライアントを定義
+const client = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
+async function main() {
+  // 1. Responses API で最初のメッセージを送信
+  const response1 = await client.responses.create({
+    model: 'gpt-4o',
+    instructions:
+      'あなたは親切な料理アドバイザーです。ユーザーの質問に対して、簡潔で実用的なアドバイスを日本語で提供してください。',
+    input: '初心者でも作れる簡単なパスタのレシピを教えてください',
+    store: true, // 会話履歴をサーバー側に保存（マルチターンに必要）
+  });
+
+  console.log('Response ID:', response1.id);
+  console.log('ステータス:', response1.status);
+  console.log('\nアシスタントの応答:');
+  console.log(response1.output_text);
+
+  // --- マルチターン会話 ---
+  console.log('\n--- マルチターン会話 ---\n');
+
+  // 2. previous_response_id を指定して会話を継続
+  const response2 = await client.responses.create({
+    model: 'gpt-4o',
+    instructions:
+      'あなたは親切な料理アドバイザーです。ユーザーの質問に対して、簡潔で実用的なアドバイスを日本語で提供してください。',
+    input: 'そのパスタに合うサラダも教えてください',
+    previous_response_id: response1.id, // 前の会話を参照
+    store: true,
+  });
+
+  console.log('Response ID:', response2.id);
+  console.log('ステータス:', response2.status);
+  console.log('\nアシスタントの応答:');
+  console.log(response2.output_text);
+
+  // 3. トークン使用量の確認
+  console.log('\n--- トークン使用量 ---');
+  console.log('1回目:', response1.usage);
+  console.log('2回目:', response2.usage);
+}
+
+main();
+```
+
+**実行方法:**
+
+```bash
+pnpm tsx chapter3/test3-5-responses-api.ts
+```
+
+**実行結果の例:**
+
+```text
+Response ID: resp_abc123
+ステータス: completed
+
+アシスタントの応答:
+初心者でも簡単に作れるペペロンチーノのレシピをご紹介します！
+
+【材料（1人前）】
+- パスタ 100g
+- にんにく 2片
+- 鷹の爪 1本
+- オリーブオイル 大さじ3
+- 塩 適量
+...
+
+--- マルチターン会話 ---
+
+Response ID: resp_def456
+ステータス: completed
+
+アシスタントの応答:
+ペペロンチーノに合うシンプルなサラダをご紹介します！
+...
+
+--- トークン使用量 ---
+1回目: { input_tokens: 45, output_tokens: 180, total_tokens: 225, ... }
+2回目: { input_tokens: 260, output_tokens: 150, total_tokens: 410, ... }
+```
+
+:::tip store と previous_response_id について
+`store: true` を設定すると、レスポンスが OpenAI のサーバー側に保存されます。保存されたレスポンスは `previous_response_id` で参照でき、過去の会話コンテキストを自動的に引き継ぎます。`store` を指定しない場合、レスポンスは保存されず `previous_response_id` で参照できません。
+:::
+
+:::info マルチターン会話のトークン使用量
+2 回目のリクエストでは `previous_response_id` を指定するだけで 1 回目の会話コンテキストが自動的に引き継がれます。ただし、2 回目のトークン使用量（`input_tokens`）が 1 回目より多くなるのは、サーバー側で 1 回目の会話履歴も含めてモデルに渡しているためです。会話が長くなるほど入力トークンが増加する点は、Chat Completions API（3-1）で `messages` 配列を手動管理する場合と同様です。
+:::
 
 ## 3-6. Function Calling
 
@@ -1879,13 +2062,13 @@ return {
 
 | カテゴリ | セクション | 学んだこと |
 | --- | --- | --- |
-| **入出力の基礎** | 3-1, 3-2, 3-3, 3-4 | テキスト生成・ベクトル化 → JSON → スキーマ準拠 JSON と、API の基本操作と出力の構造化レベルを段階的に引き上げる方法 |
+| **入出力の基礎** | 3-1, 3-2, 3-3, 3-4, 3-5 | テキスト生成・ベクトル化 → JSON → スキーマ準拠 JSON と、API の基本操作と出力の構造化レベルを段階的に引き上げる方法。Responses API による会話管理とマルチターン対話 |
 | **ツール連携** | 3-6, 3-8 | Function Calling による外部関数の呼び出しと、LangChain による宣言的なツール定義 |
 | **実践的なツール** | 3-7, 3-9, 3-11 | Web 検索（Tavily / DuckDuckGo）やデータベース検索（Text-to-SQL）など、エージェントが活用する具体的なツールの実装 |
 | **LangChain 活用** | 3-8, 3-12 | LangChain によるカスタム Tool 定義や、`ChatPromptTemplate` + `withStructuredOutput` を使った処理の簡素化 |
 | **ワークフロー構築** | 3-13 | LangGraph による有向グラフワークフローの構築と、Plan-Generate-Reflect パターンの実装 |
 
-これらの要素は、次章以降で構築する AI エージェントの土台となります。特に **Function Calling**（3-6）と **Structured Outputs**（3-4）は、エージェントがツールを呼び出し、その結果を構造化データとして扱うための中核的な仕組みであり、**Embeddings API**（3-2）は RAG やベクトル検索の基盤技術として、今後も繰り返し登場します。
+これらの要素は、次章以降で構築する AI エージェントの土台となります。特に **Function Calling**（3-6）と **Structured Outputs**（3-4）は、エージェントがツールを呼び出し、その結果を構造化データとして扱うための中核的な仕組みであり、**Responses API**（3-5）はマルチターン対話と会話管理のパターンとして、**Embeddings API**（3-2）は RAG やベクトル検索の基盤技術として、今後も繰り返し登場します。
 
 ---
 
@@ -1894,8 +2077,10 @@ return {
 - OpenAI. [Chat Completions API](https://platform.openai.com/docs/guides/text-generation) - Chat Completions API の公式ガイド（3-1）
 - OpenAI. [Embeddings](https://platform.openai.com/docs/guides/embeddings) - Embeddings API の公式ガイド（3-2）
 - OpenAI. [Structured Outputs](https://platform.openai.com/docs/guides/structured-outputs) - JSON モードおよび Structured Outputs の公式ドキュメント（3-3, 3-4）
+- OpenAI. [Responses API](https://platform.openai.com/docs/api-reference/responses) - Responses API の公式リファレンス（3-5）
+- OpenAI. [Responses vs Chat Completions](https://platform.openai.com/docs/guides/responses-vs-chat-completions) - Responses API と Chat Completions API の比較ガイド（3-5 参考）
 - OpenAI. [Function Calling](https://platform.openai.com/docs/guides/function-calling) - Function Calling の公式ドキュメント（3-6）
-- [openai (npm)](https://www.npmjs.com/package/openai) - OpenAI 公式 Node.js / TypeScript SDK（3-1, 3-3, 3-4, 3-6, 3-11）
+- [openai (npm)](https://www.npmjs.com/package/openai) - OpenAI 公式 Node.js / TypeScript SDK（3-1, 3-3, 3-4, 3-5, 3-6, 3-11）
 - [Zod](https://zod.dev/) - TypeScript ファーストのスキーマバリデーションライブラリ（3-4, 3-8, 3-11）
 - [Tavily](https://docs.tavily.com/) - AI エージェント向け Web 検索 API の公式ドキュメント（3-7）
 - [LangChain Tools](https://js.langchain.com/docs/how_to/custom_tools/) - LangChain カスタム Tool の公式ドキュメント（3-8）
