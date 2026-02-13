@@ -572,6 +572,21 @@ html {
   color: #334155;
 }
 
+.markdown h5 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+}
+
+[data-theme="dark"] .markdown h5 {
+  color: #cbd5e1;
+}
+
+[data-theme="light"] .markdown h5 {
+  color: #334155;
+}
+
 /* ---- Code Blocks ---- */
 
 [data-theme="dark"] .theme-code-block {
