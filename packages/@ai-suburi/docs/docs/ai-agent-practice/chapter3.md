@@ -10,6 +10,7 @@ sidebar_position: 2
 :::note この章で学ぶこと
 
 - **Chat Completions API** の基本的な呼び出し方とトークン使用量の確認
+- **Embeddings API** によるテキストのベクトル化とコサイン類似度の計算
 - **JSON モード**と **Structured Outputs** による構造化された出力の取得
 - **Function Calling** を使った外部ツールとの連携パターン
 - **Tavily API** を使った AI エージェント向けの Web 検索
@@ -29,7 +30,8 @@ sidebar_position: 2
 
 ```mermaid
 flowchart LR
-    A["<b>3-1</b><br/>Chat Completions API<br/>（基本の API 呼び出し）"] --> B["<b>3-3</b><br/>JSON モード<br/>（出力を JSON に制約）"]
+    A["<b>3-1</b><br/>Chat Completions API<br/>（基本の API 呼び出し）"] --> A2["<b>3-2</b><br/>Embeddings API<br/>（テキストのベクトル化）"]
+    A --> B["<b>3-3</b><br/>JSON モード<br/>（出力を JSON に制約）"]
     B --> C["<b>3-4</b><br/>Structured Outputs<br/>（スキーマ準拠の出力）"]
     C --> D["<b>3-6</b><br/>Function Calling<br/>（外部ツール連携）"]
     D --> E["<b>3-7 / 3-9</b><br/>Web 検索<br/>（Tavily / DuckDuckGo）"]
@@ -39,6 +41,7 @@ flowchart LR
     F --> I["<b>3-13</b><br/>LangGraph<br/>（ワークフロー構築）"]
 
     style A fill:#e3f2fd
+    style A2 fill:#e3f2fd
     style B fill:#e3f2fd
     style C fill:#e3f2fd
     style D fill:#fff3e0
@@ -143,6 +146,201 @@ Total Tokens: 105
 Completion_tokens_details: { reasoning_tokens: 0, ... }
 Prompt_tokens_details: { cached_tokens: 0, ... }
 ```
+
+## 3-2. Embeddings API
+
+3-1 の Chat Completions API はテキストを**生成**するための API でしたが、Embeddings API はテキストを**理解**するための API です。具体的には、テキストを数値ベクトル（埋め込み）に変換し、テキスト同士の意味的な近さを数値として扱えるようにします。
+
+たとえば、キーワード検索では「犬」と「ペット」は異なる単語として扱われ、一致しません。しかし Embeddings を使えば、これらの単語が意味的に近いことをベクトルの類似度として捉えられます。この仕組みは、[Chapter 2](./chapter2.md) で解説した長期メモリのベクトルデータベースや、後述する RAG（検索拡張生成）の基盤技術です。
+
+Chapter 2 では、ベクトルデータベースを用いた長期メモリの概念例として `createEmbedding` 関数を紹介しました。そこでは「テキストを埋め込みベクトルに変換し、類似検索で関連情報を取得する」という流れを概念的に説明しました。このセクションでは、実際に Embeddings API を呼び出してベクトルを取得し、コサイン類似度で類似度を数値として確認します。
+
+### Chat Completions API（3-1）との違い
+
+| 項目 | Chat Completions API（3-1） | Embeddings API（3-2） |
+| --- | --- | --- |
+| 目的 | テキストの生成（対話・要約・翻訳など） | テキストのベクトル表現への変換 |
+| 入力 | `messages` 配列（ロール + メッセージ） | `input`（文字列または文字列の配列） |
+| 出力 | 自然言語テキスト | 数値ベクトル（例: 1536 次元の `number[]`） |
+| 主な用途 | チャット、文章作成、コード生成 | 類似検索、クラスタリング、RAG |
+
+### Embeddings API の主なパラメータ
+
+| パラメータ | 説明 |
+| --- | --- |
+| `model` | 使用するモデル。`text-embedding-3-small`（高速・低コスト）または `text-embedding-3-large`（高精度） |
+| `input` | 埋め込みを生成するテキスト。文字列または文字列の配列を指定可能 |
+| `dimensions` | 出力ベクトルの次元数を削減する（`text-embedding-3` 系のみ対応）。デフォルトは `text-embedding-3-small` で 1536 次元 |
+
+### コサイン類似度とは？
+
+コサイン類似度は、2 つのベクトルの方向がどれだけ近いかを測る指標です。値は -1 から 1 の範囲で、1 に近いほど意味が類似していることを表します。
+
+| 値の範囲 | 意味 | 例 |
+| --- | --- | --- |
+| 0.9 〜 1.0 | 非常に類似 | 「犬が走る」と「犬が駆ける」 |
+| 0.7 〜 0.9 | やや類似 | 「犬が走る」と「猫が走る」 |
+| 0.3 〜 0.7 | あまり関連なし | 「犬が走る」と「今日は晴れ」 |
+| -1.0 〜 0.3 | ほぼ無関係 | 「犬が走る」と「経済指標の推移」 |
+
+計算式は以下の通りです。
+
+```text
+cos(A, B) = (A・B) / (|A| × |B|)
+```
+
+- `A・B` はベクトル A と B の内積（各要素の積の合計）
+- `|A|`、`|B|` はそれぞれのベクトルのノルム（大きさ）
+
+このサンプルでは、コサイン類似度を自前で実装し、3 つのテキストと基準テキストの類似度を比較します。
+
+:::info dimensions パラメータによる次元数の削減
+`text-embedding-3-small` のデフォルト次元数は 1536 ですが、`dimensions` パラメータを指定することで、出力ベクトルの次元数を削減できます（例: `dimensions: 256`）。次元数を減らすとベクトルデータベースのストレージコストや検索速度が改善しますが、精度はやや低下します。用途に応じて適切な次元数を選択してください。
+:::
+
+### サンプルで行うこと
+
+このサンプルでは以下を行います。
+
+- Embeddings API で単一テキストをベクトル化し、モデル名・次元数・トークン使用量を確認
+- `input` に文字列の配列を渡すことで、3 つのテキスト（ほぼ同じ意味 / やや関連 / 無関係）をまとめてベクトル化（バッチ処理）
+- 基準テキストとのコサイン類似度を計算し、意味の近さを数値で比較
+
+レスポンスの `response.data` は埋め込みオブジェクトの配列で、各要素の `.embedding` プロパティに `number[]` 型のベクトルが格納されています。
+
+```typescript title="chapter3/test3-2-embeddings-api.ts"
+import OpenAI from 'openai';
+
+// クライアントを定義
+const client = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
+// コサイン類似度を計算する関数
+function cosineSimilarity(vecA: number[], vecB: number[]): number {
+  if (vecA.length !== vecB.length) {
+    throw new Error('ベクトルの次元数が一致しません');
+  }
+  let dotProduct = 0;
+  let normA = 0;
+  let normB = 0;
+  for (let i = 0; i < vecA.length; i++) {
+    dotProduct += vecA[i]! * vecB[i]!;
+    normA += vecA[i]! * vecA[i]!;
+    normB += vecB[i]! * vecB[i]!;
+  }
+  return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+async function main() {
+  // --- 1. 基本的な Embeddings API 呼び出し ---
+  const response = await client.embeddings.create({
+    model: 'text-embedding-3-small',
+    input: 'AIエージェントは自律的にタスクを実行するシステムです',
+  });
+
+  const embedding = response.data[0]!.embedding;
+  console.log('--- Embeddings API 基本呼び出し ---');
+  console.log('モデル:', response.model);
+  console.log('ベクトルの次元数:', embedding.length);
+  console.log('ベクトルの先頭5要素:', embedding.slice(0, 5));
+  console.log('トークン使用量:', response.usage);
+  console.log();
+
+  // --- 2. 複数テキストの埋め込みとコサイン類似度 ---
+  const texts = [
+    'AIエージェントは自律的にタスクを実行するプログラムです', // 類似テキスト
+    '機械学習モデルを使って自動化されたワークフローを構築する', // やや類似
+    '今日の東京の天気は晴れで、気温は25度です', // 無関係なテキスト
+  ];
+
+  const batchResponse = await client.embeddings.create({
+    model: 'text-embedding-3-small',
+    input: texts,
+  });
+
+  console.log('--- コサイン類似度の比較 ---');
+  console.log(
+    '基準テキスト: "AIエージェントは自律的にタスクを実行するシステムです"',
+  );
+  console.log();
+  for (let i = 0; i < batchResponse.data.length; i++) {
+    const similarity = cosineSimilarity(
+      embedding,
+      batchResponse.data[i]!.embedding,
+    );
+    console.log(`テキスト: "${texts[i]}"`);
+    console.log(`類似度:   ${similarity.toFixed(4)}`);
+    console.log();
+  }
+}
+
+main();
+```
+
+**実行方法:**
+
+```bash
+pnpm tsx chapter3/test3-2-embeddings-api.ts
+```
+
+**実行結果の例:**
+
+```text
+--- Embeddings API 基本呼び出し ---
+モデル: text-embedding-3-small
+ベクトルの次元数: 1536
+ベクトルの先頭5要素: [ -0.0123, 0.0456, -0.0789, 0.0234, -0.0567 ]
+トークン使用量: { prompt_tokens: 19, total_tokens: 19 }
+
+--- コサイン類似度の比較 ---
+基準テキスト: "AIエージェントは自律的にタスクを実行するシステムです"
+
+テキスト: "AIエージェントは自律的にタスクを実行するプログラムです"
+類似度:   0.9234
+
+テキスト: "機械学習モデルを使って自動化されたワークフローを構築する"
+類似度:   0.7456
+
+テキスト: "今日の東京の天気は晴れで、気温は25度です"
+類似度:   0.3891
+```
+
+意味が近いテキストほどコサイン類似度が高くなっていることが確認できます。「システム」と「プログラム」のように表現が異なっていても、意味が近ければ高い類似度を示すのが Embeddings の特徴です。
+
+### RAG（Retrieval-Augmented Generation）の概要
+
+LLM は学習データに含まれない情報（社内ドキュメント、最新ニュース、個人のメモなど）については回答できません。RAG（検索拡張生成）は、この制約を補うための手法です。
+
+仕組みはシンプルです。ユーザーの質問に関連する情報を外部データからベクトル検索で取得し、それをコンテキストとして LLM に渡します。これにより、LLM の学習データに含まれない知識を活用した回答を生成できます。
+
+Embeddings API は、この RAG パイプラインの中核技術として以下の 2 つの場面で使われます。
+
+1. **インデックス作成時** — ドキュメントをチャンク（数百〜数千文字の断片）に分割してベクトル化し、ベクトルデータベースに保存
+2. **検索時** — ユーザーの質問をベクトル化し、類似度の高いチャンクを検索
+
+```mermaid
+flowchart TD
+    subgraph idx["1. インデックス作成"]
+        direction LR
+        D["ドキュメント"] --> S["チャンク分割"] --> E1["Embeddings API"] --> V["ベクトル DB<br/>に保存"]
+    end
+
+    subgraph query["2. 検索 & 生成"]
+        direction LR
+        Q["ユーザーの質問"] --> E2["Embeddings API"] --> R["ベクトル DB で<br/>類似検索"] --> L["関連ドキュメント +<br/>質問を LLM に送信"] --> ANS["回答を生成"]
+    end
+
+    idx ~~~ query
+
+    style E1 fill:#e3f2fd
+    style E2 fill:#e3f2fd
+    style L fill:#fff3e0
+```
+
+:::tip RAG と長期メモリの関係
+Chapter 2 で紹介したベクトルデータベースを用いた長期メモリは、RAG の一形態と捉えることができます。エージェントが過去の会話や学習した知識をベクトル DB に保存し、新しい質問に対して関連情報を検索して活用する仕組みは、RAG のパイプラインそのものです。RAG の詳しい実装については、後続の章で扱います。
+:::
 
 ## 3-3. JSON Outputs
 
@@ -1681,19 +1879,20 @@ return {
 
 | カテゴリ | セクション | 学んだこと |
 | --- | --- | --- |
-| **入出力の基礎** | 3-1, 3-3, 3-4 | テキスト → JSON → スキーマ準拠 JSON と、出力の構造化レベルを段階的に引き上げる方法 |
+| **入出力の基礎** | 3-1, 3-2, 3-3, 3-4 | テキスト生成・ベクトル化 → JSON → スキーマ準拠 JSON と、API の基本操作と出力の構造化レベルを段階的に引き上げる方法 |
 | **ツール連携** | 3-6, 3-8 | Function Calling による外部関数の呼び出しと、LangChain による宣言的なツール定義 |
 | **実践的なツール** | 3-7, 3-9, 3-11 | Web 検索（Tavily / DuckDuckGo）やデータベース検索（Text-to-SQL）など、エージェントが活用する具体的なツールの実装 |
 | **LangChain 活用** | 3-8, 3-12 | LangChain によるカスタム Tool 定義や、`ChatPromptTemplate` + `withStructuredOutput` を使った処理の簡素化 |
 | **ワークフロー構築** | 3-13 | LangGraph による有向グラフワークフローの構築と、Plan-Generate-Reflect パターンの実装 |
 
-これらの要素は、次章以降で構築する AI エージェントの土台となります。特に **Function Calling**（3-6）と **Structured Outputs**（3-4）は、エージェントがツールを呼び出し、その結果を構造化データとして扱うための中核的な仕組みであり、今後も繰り返し登場します。
+これらの要素は、次章以降で構築する AI エージェントの土台となります。特に **Function Calling**（3-6）と **Structured Outputs**（3-4）は、エージェントがツールを呼び出し、その結果を構造化データとして扱うための中核的な仕組みであり、**Embeddings API**（3-2）は RAG やベクトル検索の基盤技術として、今後も繰り返し登場します。
 
 ---
 
 ## 参考文献
 
 - OpenAI. [Chat Completions API](https://platform.openai.com/docs/guides/text-generation) - Chat Completions API の公式ガイド（3-1）
+- OpenAI. [Embeddings](https://platform.openai.com/docs/guides/embeddings) - Embeddings API の公式ガイド（3-2）
 - OpenAI. [Structured Outputs](https://platform.openai.com/docs/guides/structured-outputs) - JSON モードおよび Structured Outputs の公式ドキュメント（3-3, 3-4）
 - OpenAI. [Function Calling](https://platform.openai.com/docs/guides/function-calling) - Function Calling の公式ドキュメント（3-6）
 - [openai (npm)](https://www.npmjs.com/package/openai) - OpenAI 公式 Node.js / TypeScript SDK（3-1, 3-3, 3-4, 3-6, 3-11）
