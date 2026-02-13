@@ -239,6 +239,9 @@ export interface AgentResult {
 
 `HelpDeskAgentPrompts` クラスでデフォルト値を持ちつつ、コンストラクタでカスタマイズも可能な設計です。プロンプト内の `{question}` や `{plan}` はプレースホルダーで、実行時に実際の値に置換されます。
 
+<details>
+<summary>chapter4/prompts.ts（クリックで展開）</summary>
+
 ```typescript title="chapter4/prompts.ts"
 const PLANNER_SYSTEM_PROMPT = `
 # 役割
@@ -374,6 +377,8 @@ export class HelpDeskAgentPrompts {
 }
 ```
 
+</details>
+
 #### HelpDeskAgent クラス (`agent.ts`)
 
 エージェントの中核となるクラスです。LangGraph の `StateGraph` を使って、メイングラフ（計画 → サブタスク並列実行 → 最終回答）とサブグラフ（ツール選択 → 実行 → 回答 → リフレクション）を定義しています。
@@ -392,31 +397,45 @@ export class HelpDeskAgentPrompts {
 
 なお、OpenAI API の呼び出しでは `temperature: 0` と `seed: 0` を指定しています。`temperature` は生成テキストのランダム性を制御するパラメータで、0 に設定するとモデルが最も確率の高いトークンを選択するようになり、出力の再現性が高まります。`seed` はランダム性のシード値で、同じ値を指定することで同一入力に対して可能な限り同じ出力を得られます（ただし完全な一致は保証されません）。
 
+また、`MAX_CHALLENGE_COUNT = 3` はサブタスクのリフレクションで「不十分」と判定された場合に何回までリトライするかの上限値です。
+
+##### 状態定義（Annotation）
+
+LangGraph の `Annotation.Root` を使って、**メイングラフ**と**サブグラフ**それぞれの状態（State）を定義しています。
+
+**メイングラフの状態（`AgentStateAnnotation`）**:
+
+| フィールド | 型 | 説明 |
+| --- | --- | --- |
+| `question` | `string` | ユーザーの質問 |
+| `plan` | `string[]` | 計画で生成されたサブタスク一覧 |
+| `currentStep` | `number` | 現在実行中のサブタスクのインデックス |
+| `subtaskResults` | `Subtask[]` | サブタスクの実行結果（reducer で追記） |
+| `lastAnswer` | `string` | 最終回答 |
+
+**サブグラフの状態（`AgentSubGraphStateAnnotation`）**:
+
+| フィールド | 型 | 説明 |
+| --- | --- | --- |
+| `question` | `string` | ユーザーの質問 |
+| `plan` | `string[]` | 計画で生成されたサブタスク一覧 |
+| `subtask` | `string` | 現在処理中のサブタスク |
+| `isCompleted` | `boolean` | リフレクションで「完了」と判定されたか |
+| `messages` | `ChatCompletionMessageParam[]` | OpenAI API とのやり取り履歴（last write wins） |
+| `challengeCount` | `number` | リトライ回数 |
+| `toolResults` | `ToolResult[][]` | ツール実行結果（reducer で追記） |
+| `reflectionResults` | `ReflectionResult[]` | リフレクション結果（reducer で追記） |
+| `subtaskAnswer` | `string` | サブタスクの回答 |
+
+`messages` の reducer は `(old, newVal) => newVal`（last write wins）で、常に最新の配列で上書きされます。一方、`subtaskResults`・`toolResults`・`reflectionResults` の reducer は `(a, b) => [...a, ...b]` で、既存の配列に新しい値を追記する動作になっています。
+
+:::info reducer の使い分け
+
+LangGraph の `Annotation` で reducer を指定しないフィールド（`question`、`plan` など）は **last write wins**（最後に書き込まれた値で上書き）がデフォルトの動作です。reducer を明示的に指定すると、ノードの戻り値が既存の状態にどうマージされるかを細かく制御できます。蓄積型のデータ（実行結果のログ、リフレクション履歴など）には `(a, b) => [...a, ...b]` の追記パターンが適しています。
+
+:::
+
 ```typescript title="chapter4/agent.ts"
-import type { StructuredToolInterface } from '@langchain/core/tools';
-import { convertToOpenAITool } from '@langchain/core/utils/function_calling';
-import { Annotation, END, Send, START, StateGraph } from '@langchain/langgraph';
-import OpenAI from 'openai';
-import { zodResponseFormat } from 'openai/helpers/zod';
-import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
-
-import type { Settings } from './configs.js';
-import { setupLogger } from './custom-logger.js';
-import {
-  type AgentResult,
-  planSchema,
-  type ReflectionResult,
-  reflectionResultSchema,
-  type SearchOutput,
-  type Subtask,
-  type ToolResult,
-} from './models.js';
-import { HelpDeskAgentPrompts } from './prompts.js';
-
-const MAX_CHALLENGE_COUNT = 3;
-
-const logger = setupLogger('agent');
-
 // メイングラフの状態定義
 const AgentStateAnnotation = Annotation.Root({
   question: Annotation<string>,
@@ -458,29 +477,78 @@ const AgentSubGraphStateAnnotation = Annotation.Root({
 });
 
 export type AgentSubGraphState = typeof AgentSubGraphStateAnnotation.State;
+```
 
-export class HelpDeskAgent {
-  private settings: Settings;
-  private tools: StructuredToolInterface[];
-  private toolMap: Map<string, StructuredToolInterface>;
-  private prompts: HelpDeskAgentPrompts;
-  private client: OpenAI;
+##### `runAgent()` — エージェントの実行
 
-  constructor(
-    settings: Settings,
-    tools: StructuredToolInterface[] = [],
-    prompts: HelpDeskAgentPrompts = new HelpDeskAgentPrompts(),
-  ) {
-    this.settings = settings;
-    this.tools = tools;
-    this.toolMap = new Map(tools.map((tool) => [tool.name, tool]));
-    this.prompts = prompts;
-    this.client = new OpenAI({ apiKey: this.settings.openaiApiKey });
+エージェントのエントリーポイントです。`createGraph()` でメイングラフを構築し、`invoke()` でユーザーの質問を渡して実行します。グラフの実行結果（計画・サブタスク結果・最終回答）を `AgentResult` 型に整形して返します。
+
+```typescript title="chapter4/agent.ts"
+  async runAgent(question: string): Promise<AgentResult> {
+    const app = this.createGraph();
+    const result = await app.invoke({
+      question,
+      currentStep: 0,
+    });
+
+    return {
+      question,
+      plan: { subtasks: result.plan },
+      subtasks: result.subtaskResults,
+      answer: result.lastAnswer,
+    };
+  }
+```
+
+##### `createGraph()` と `createSubgraph()` — グラフ構築
+
+**`createGraph()`** はメイングラフ（計画 → サブタスク並列実行 → 最終回答）を構築します。`addConditionalEdges` で `create_plan` ノードから `Send` を使った動的並列実行を実現しています。
+
+**`createSubgraph()`** はサブグラフ（ツール選択 → ツール実行 → サブタスク回答 → リフレクション のループ）を構築します。`addConditionalEdges` で `reflect_subtask` ノードからの分岐を定義し、`shouldContinueExecSubtaskFlow()` の結果に応じてリトライか終了かを制御しています。
+
+```typescript title="chapter4/agent.ts"
+  createGraph() {
+    // メソッドチェーンでノードとエッジを追加（型推論のため）
+    return new StateGraph(AgentStateAnnotation)
+      .addNode('create_plan', (state) => this.createPlan(state))
+      .addNode('execute_subtasks', (state) => this.executeSubgraph(state))
+      .addNode('create_answer', (state) => this.createAnswer(state))
+      .addEdge(START, 'create_plan')
+      .addConditionalEdges('create_plan', (state) =>
+        this.shouldContinueExecSubtasks(state),
+      )
+      .addEdge('execute_subtasks', 'create_answer')
+      .addEdge('create_answer', END)
+      .compile();
   }
 
-  /**
-   * 計画を作成する
-   */
+  private createSubgraph() {
+    // メソッドチェーンでノードとエッジを追加（型推論のため）
+    return new StateGraph(AgentSubGraphStateAnnotation)
+      .addNode('select_tools', (state) => this.selectTools(state))
+      .addNode('execute_tools', (state) => this.executeTools(state))
+      .addNode('create_subtask_answer', (state) =>
+        this.createSubtaskAnswer(state),
+      )
+      .addNode('reflect_subtask', (state) => this.reflectSubtask(state))
+      .addEdge(START, 'select_tools')
+      .addEdge('select_tools', 'execute_tools')
+      .addEdge('execute_tools', 'create_subtask_answer')
+      .addEdge('create_subtask_answer', 'reflect_subtask')
+      .addConditionalEdges(
+        'reflect_subtask',
+        (state) => this.shouldContinueExecSubtaskFlow(state),
+        { continue: 'select_tools', end: END },
+      )
+      .compile();
+  }
+```
+
+##### `createPlan()` — 計画の作成
+
+**メイングラフのノード**。ユーザーの質問を受け取り、OpenAI API の **Structured Outputs**（`zodResponseFormat` + `planSchema`）を使って、質問を解決するためのサブタスク一覧を生成します。返却値の `{ plan: string[] }` が `AgentStateAnnotation` の `plan` フィールドに書き込まれ、次のステップで各サブタスクが `Send` によって並列実行されます。
+
+```typescript title="chapter4/agent.ts"
   async createPlan(state: AgentState): Promise<{ plan: string[] }> {
     logger.info('🚀 Starting plan generation process...');
 
@@ -512,10 +580,76 @@ export class HelpDeskAgent {
 
     return { plan: plan.subtasks };
   }
+```
 
-  /**
-   * ツールを選択する
-   */
+##### `executeSubgraph()` と制御フローメソッド
+
+**`executeSubgraph()`** はメイングラフの `execute_subtasks` ノードに対応するメソッドです。サブグラフを作成・実行し、結果を `Subtask` オブジェクトとして返します。各サブタスクの質問・計画・実行対象のサブタスクを初期状態として渡しています。
+
+**`shouldContinueExecSubtasks()`** は `create_plan` ノードの条件付きエッジで使われ、計画内の各サブタスクに対して `Send` オブジェクトを生成します。これにより、サブタスクの数だけ `execute_subtasks` ノードが**動的に並列生成**されます。
+
+**`shouldContinueExecSubtaskFlow()`** はサブグラフの `reflect_subtask` ノードの条件付きエッジで使われ、リフレクション結果（`isCompleted`）またはリトライ回数（`challengeCount`）に基づいて「ツール選択に戻ってリトライ」か「終了」かを判定します。
+
+:::tip Send による動的並列実行
+
+LangGraph の `Send` は、条件付きエッジの戻り値として複数の `Send` オブジェクトを返すことで、**実行時に決まる数のノードインスタンスを並列生成**できる仕組みです。通常の `addEdge` では遷移先が静的に 1 つですが、`Send` を使えば「計画で 3 つのサブタスクが生成されたら 3 並列、5 つなら 5 並列」のように動的にスケールします。
+
+:::
+
+```typescript title="chapter4/agent.ts"
+  private async executeSubgraph(state: AgentState) {
+    const subgraph = this.createSubgraph();
+
+    const result = await subgraph.invoke({
+      question: state.question,
+      plan: state.plan,
+      subtask: state.plan[state.currentStep] ?? '',
+      isCompleted: false,
+      challengeCount: 0,
+    });
+
+    const subtaskResult: Subtask = {
+      taskName: result.subtask,
+      toolResults: result.toolResults,
+      reflectionResults: result.reflectionResults,
+      isCompleted: result.isCompleted,
+      subtaskAnswer: result.subtaskAnswer,
+      challengeCount: result.challengeCount,
+    };
+
+    return { subtaskResults: [subtaskResult] };
+  }
+
+  private shouldContinueExecSubtasks(state: AgentState): Send[] {
+    return state.plan.map(
+      (_, idx) =>
+        new Send('execute_subtasks', {
+          question: state.question,
+          plan: state.plan,
+          currentStep: idx,
+        }),
+    );
+  }
+
+  private shouldContinueExecSubtaskFlow(
+    state: AgentSubGraphState,
+  ): 'end' | 'continue' {
+    if (state.isCompleted || state.challengeCount >= MAX_CHALLENGE_COUNT) {
+      return 'end';
+    }
+    return 'continue';
+  }
+```
+
+##### `selectTools()` — ツールの選択
+
+**サブグラフのノード**。サブタスクに対して適切なツールを選ぶステップです。`convertToOpenAITool` で LangChain のツール定義を OpenAI の Function Calling 形式に変換し、API の `tools` パラメータに渡しています。
+
+初回（`challengeCount === 0`）ではサブタスク用のプロンプトを新規作成します。リトライ時（`challengeCount >= 1`）は、過去の対話履歴からツール応答（`role: 'tool'` や `tool_calls` を含むメッセージ）を除外してトークン消費を抑えつつ、リトライ用プロンプトを追加します。
+
+モデルがツールを呼ばずにテキストで応答した場合のフォールバック処理も含まれています。
+
+```typescript title="chapter4/agent.ts"
   async selectTools(
     state: AgentSubGraphState,
   ): Promise<{ messages: ChatCompletionMessageParam[] }> {
@@ -582,10 +716,15 @@ export class HelpDeskAgent {
 
     return { messages };
   }
+```
 
-  /**
-   * ツールを実行する
-   */
+##### `executeTools()` — ツールの実行
+
+**サブグラフのノード**。`selectTools()` で選択されたツールを実際に実行するステップです。直前のメッセージから `tool_calls` を取得し、`toolMap`（コンストラクタで構築した名前→ツールの `Map`）を使って対応するツールを呼び出します。
+
+各ツールの実行結果は `ToolResult` として記録されると同時に、OpenAI のメッセージ形式（`role: 'tool'`）として `messages` にも追加されます。これにより、次の `createSubtaskAnswer()` で LLM がツール実行結果を参照して回答を生成できるようになります。
+
+```typescript title="chapter4/agent.ts"
   async executeTools(state: AgentSubGraphState): Promise<{
     messages: ChatCompletionMessageParam[];
     toolResults: ToolResult[][];
@@ -637,10 +776,13 @@ export class HelpDeskAgent {
     logger.info('Tool execution complete!');
     return { messages, toolResults: [toolResults] };
   }
+```
 
-  /**
-   * サブタスク回答を作成する
-   */
+##### `createSubtaskAnswer()` — サブタスク回答の作成
+
+**サブグラフのノード**。ツールの実行結果が含まれた `messages` をそのまま OpenAI API に渡し、サブタスクに対する回答を生成します。ツール結果（`role: 'tool'`）のコンテキストが `messages` に含まれているため、追加のプロンプトなしで LLM がツール結果を踏まえた適切な回答を返せる仕組みになっています。
+
+```typescript title="chapter4/agent.ts"
   async createSubtaskAnswer(state: AgentSubGraphState): Promise<{
     messages: ChatCompletionMessageParam[];
     subtaskAnswer: string;
@@ -669,10 +811,15 @@ export class HelpDeskAgent {
 
     return { messages, subtaskAnswer };
   }
+```
 
-  /**
-   * サブタスク回答を内省する
-   */
+##### `reflectSubtask()` — サブタスク回答のリフレクション
+
+**サブグラフのノード**。生成されたサブタスク回答の品質を LLM 自身に評価させるステップです。Structured Outputs（`reflectionResultSchema`）を使い、回答が十分かどうか（`isCompleted`）とアドバイス（`advice`）を構造化データとして返します。
+
+`isCompleted` が `false` の場合、`challengeCount` をインクリメントしてサブグラフのループ先頭（ツール選択）に戻ります。`challengeCount` が `MAX_CHALLENGE_COUNT`（3回）に達しても完了しない場合は強制的に終了し、「回答が見つかりませんでした」というフォールバック回答をセットします。
+
+```typescript title="chapter4/agent.ts"
   async reflectSubtask(state: AgentSubGraphState): Promise<{
     messages: ChatCompletionMessageParam[];
     reflectionResults: ReflectionResult[];
@@ -732,10 +879,13 @@ export class HelpDeskAgent {
     logger.info('Reflection complete!');
     return updateState;
   }
+```
 
-  /**
-   * 最終回答を作成する
-   */
+##### `createAnswer()` — 最終回答の作成
+
+**メイングラフのノード**。すべてのサブタスクが完了した後に実行され、各サブタスクの回答を統合してユーザーへの最終回答を生成します。`subtaskResults` から各タスクの名前と回答のペアだけを抽出し、専用のシステムプロンプト・ユーザープロンプトと合わせて OpenAI API に渡しています。
+
+```typescript title="chapter4/agent.ts"
   async createAnswer(state: AgentState): Promise<{ lastAnswer: string }> {
     logger.info('🚀 Starting final answer creation process...');
     const systemPrompt = this.prompts.createLastAnswerSystemPrompt;
@@ -767,125 +917,6 @@ export class HelpDeskAgent {
 
     return { lastAnswer: response.choices[0]?.message.content ?? '' };
   }
-
-  /**
-   * サブタスクをサブグラフで実行し、結果を返す
-   * @param state - メイングラフの現在の状態
-   * @returns サブタスク実行結果の配列
-   */
-  private async executeSubgraph(state: AgentState) {
-    const subgraph = this.createSubgraph();
-
-    const result = await subgraph.invoke({
-      question: state.question,
-      plan: state.plan,
-      subtask: state.plan[state.currentStep] ?? '',
-      isCompleted: false,
-      challengeCount: 0,
-    });
-
-    const subtaskResult: Subtask = {
-      taskName: result.subtask,
-      toolResults: result.toolResults,
-      reflectionResults: result.reflectionResults,
-      isCompleted: result.isCompleted,
-      subtaskAnswer: result.subtaskAnswer,
-      challengeCount: result.challengeCount,
-    };
-
-    return { subtaskResults: [subtaskResult] };
-  }
-
-  /**
-   * 計画内の各サブタスクを並列実行するためのSendリストを生成する
-   * @param state - メイングラフの現在の状態
-   * @returns 各サブタスクに対応するSendオブジェクトの配列
-   */
-  private shouldContinueExecSubtasks(state: AgentState): Send[] {
-    return state.plan.map(
-      (_, idx) =>
-        new Send('execute_subtasks', {
-          question: state.question,
-          plan: state.plan,
-          currentStep: idx,
-        }),
-    );
-  }
-
-  /**
-   * サブタスクの実行フローを継続するか終了するか判定する
-   * @param state - サブグラフの現在の状態
-   * @returns 継続する場合は'continue'、終了する場合は'end'
-   */
-  private shouldContinueExecSubtaskFlow(
-    state: AgentSubGraphState,
-  ): 'end' | 'continue' {
-    if (state.isCompleted || state.challengeCount >= MAX_CHALLENGE_COUNT) {
-      return 'end';
-    }
-    return 'continue';
-  }
-
-  /**
-   * サブグラフを作成する
-   */
-  private createSubgraph() {
-    // メソッドチェーンでノードとエッジを追加（型推論のため）
-    return new StateGraph(AgentSubGraphStateAnnotation)
-      .addNode('select_tools', (state) => this.selectTools(state))
-      .addNode('execute_tools', (state) => this.executeTools(state))
-      .addNode('create_subtask_answer', (state) =>
-        this.createSubtaskAnswer(state),
-      )
-      .addNode('reflect_subtask', (state) => this.reflectSubtask(state))
-      .addEdge(START, 'select_tools')
-      .addEdge('select_tools', 'execute_tools')
-      .addEdge('execute_tools', 'create_subtask_answer')
-      .addEdge('create_subtask_answer', 'reflect_subtask')
-      .addConditionalEdges(
-        'reflect_subtask',
-        (state) => this.shouldContinueExecSubtaskFlow(state),
-        { continue: 'select_tools', end: END },
-      )
-      .compile();
-  }
-
-  /**
-   * エージェントのメイングラフを作成する
-   */
-  createGraph() {
-    // メソッドチェーンでノードとエッジを追加（型推論のため）
-    return new StateGraph(AgentStateAnnotation)
-      .addNode('create_plan', (state) => this.createPlan(state))
-      .addNode('execute_subtasks', (state) => this.executeSubgraph(state))
-      .addNode('create_answer', (state) => this.createAnswer(state))
-      .addEdge(START, 'create_plan')
-      .addConditionalEdges('create_plan', (state) =>
-        this.shouldContinueExecSubtasks(state),
-      )
-      .addEdge('execute_subtasks', 'create_answer')
-      .addEdge('create_answer', END)
-      .compile();
-  }
-
-  /**
-   * エージェントを実行する
-   */
-  async runAgent(question: string): Promise<AgentResult> {
-    const app = this.createGraph();
-    const result = await app.invoke({
-      question,
-      currentStep: 0,
-    });
-
-    return {
-      question,
-      plan: { subtasks: result.plan },
-      subtasks: result.subtaskResults,
-      answer: result.lastAnswer,
-    };
-  }
-}
 ```
 
 ## 4-1. マニュアル検索ツールの実装
