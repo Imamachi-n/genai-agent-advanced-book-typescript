@@ -75,6 +75,8 @@ direnv allow
 
 ```zsh
 export OPENAI_API_KEY="your-key"
+export GOOGLE_API_KEY="your-key"
+export ANTHROPIC_API_KEY="your-key"
 export TAVILY_API_KEY="your-key"
 ```
 
@@ -93,6 +95,30 @@ OpenAI の API キーは以下の手順で取得できます。
 > ⚠️ API キーは作成時に一度しか表示されません。必ずコピーして安全な場所に保管してください。
 >
 > ⚠️ APIの利用にはクレジットの購入（有料）が必要です。[Billing](https://platform.openai.com/settings/organization/billing/overview) ページからクレジットを追加してください。
+
+##### GOOGLE_API_KEY
+
+Google Gemini API のキーは以下の手順で取得できます。
+
+1. [Google AI Studio](https://aistudio.google.com/) にアクセスし、Google アカウントでログイン
+2. 左メニューまたはヘッダーの **Get API key** をクリック
+3. **Create API key** をクリックしてキーを生成
+4. 生成されたキーをコピーして `.envrc` の `GOOGLE_API_KEY` に設定
+
+> ℹ️ 無料枠が用意されており、一定のレート制限内であれば無料で利用できます。
+
+##### ANTHROPIC_API_KEY
+
+Anthropic（Claude）の API キーは以下の手順で取得できます。
+
+1. [Anthropic Console](https://console.anthropic.com/) にアクセスし、アカウントを作成またはログイン
+2. 左メニューの **API Keys** をクリック
+3. **Create Key** をクリックしてキーを生成
+4. 生成されたキー（`sk-ant-...` の形式）をコピーして `.envrc` の `ANTHROPIC_API_KEY` に設定
+
+> ⚠️ API キーは作成時に一度しか表示されません。必ずコピーして安全な場所に保管してください。
+>
+> ⚠️ API の利用にはクレジットの購入（有料）が必要です。[Plans & Billing](https://console.anthropic.com/settings/plans) ページからクレジットを追加してください。
 
 ##### TAVILY_API_KEY
 

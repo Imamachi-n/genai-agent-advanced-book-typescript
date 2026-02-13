@@ -77,6 +77,19 @@ TypeScript ファイルのパスを受け取り、型エラー修正・非推奨
 - ロジックの変更は行わない（型アノテーションや import の整理のみ）
 - 既存のコードスタイル（インデント・クォート・セミコロン等）を維持する
 - 不確実な修正は行わず、ユーザーに確認を取る
+- 非 null アサーション（感嘆符）は使用禁止。代わりにオプショナルチェーン（ ?. ）や Nullish Coalescing（ ?? デフォルト値 ）を使う。具体例:
+
+```typescript
+// NG: 非 null アサーション
+obj.prop!
+arr[0]!
+response.data!.value!
+
+// OK: オプショナルチェーン + Nullish Coalescing
+obj.prop ?? デフォルト値
+if (!arr[0]) return; // ガード節で対応
+response.data?.value ?? デフォルト値
+```
 
 ## 出力
 

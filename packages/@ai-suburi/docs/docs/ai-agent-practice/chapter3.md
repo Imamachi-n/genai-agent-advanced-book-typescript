@@ -2,9 +2,12 @@
 sidebar_position: 2
 ---
 
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
 # Chapter 3: AIエージェントの開発準備
 
-この章では、AI エージェントを構築するための土台となる OpenAI API の基本的な使い方を、実際のコードを動かしながら学んでいきます。
+この章では、AI エージェントを構築するための土台となる LLM API の基本的な使い方を、実際のコードを動かしながら学んでいきます。主に OpenAI を中心に解説しますが、一部のセクション（3-1、3-2、3-4、3-6）では **Google Gemini** や **Anthropic Claude** の API も併せて紹介します。同じタスクを異なるプロバイダーで実装することで、API 設計の共通点や差異を実感できる構成です。
 [Chapter 2](./chapter2.md) で解説した「プロフィール」「メモリ」「ツール」「プランニング」の各コンポーネントが、API レベルではどのように実現されるのかを体感できる内容になっています。
 
 :::note この章で学ぶこと
@@ -58,6 +61,8 @@ flowchart LR
 :::info 前提条件
 
 - 環境変数 `OPENAI_API_KEY` に OpenAI の API キーが設定されていること
+- 3-1, 3-2, 3-4, 3-6 で Gemini の例を実行する場合、環境変数 `GOOGLE_API_KEY` に [Google AI Studio](https://aistudio.google.com/) の API キーが設定されていること
+- 3-1, 3-4, 3-6 で Claude の例を実行する場合、環境変数 `ANTHROPIC_API_KEY` に [Anthropic Console](https://console.anthropic.com/) の API キーが設定されていること
 - 3-7 のみ、環境変数 `TAVILY_API_KEY` に Tavily の API キーが設定されていること
 - 3-11 のみ、`better-sqlite3` パッケージがインストールされていること（`pnpm install` で自動インストール）
 - 3-12 のみ、`@langchain/openai` パッケージが追加で必要（`pnpm install` で自動インストール）
@@ -76,7 +81,7 @@ pnpm tsx chapter3/<ファイル名>.ts
 
 ## 3-1. Chat Completions API
 
-Chat Completions API は、OpenAI のチャットモデルと対話するための最も基本的な API です。
+Chat Completions API（チャット API）は、LLM と対話するための最も基本的な API です。
 AI エージェントを構築する際、すべての対話はこの API を通じて行われるため、まずここでの基本操作をしっかり押さえておくことが重要です。
 
 `messages` 配列にロール（`system`, `user`, `assistant`）とメッセージを渡すことで、モデルからの応答を取得できます。各ロールの役割は以下のとおりです。
@@ -89,13 +94,28 @@ AI エージェントを構築する際、すべての対話はこの API を通
 
 このサンプルでは以下を行います。
 
-- `gpt-4o` モデルへのメッセージ送信
+- モデルへのメッセージ送信
 - 応答テキストの取得
 - トークン使用量（プロンプト / 生成 / 合計）の確認
 
 :::info トークンとは？
 トークンは、モデルがテキストを処理する際の最小単位です。英語では 1 単語が約 1 トークン、日本語ではひらがな 1 文字が約 1 トークンに相当します。API の利用料金はトークン数に基づいて計算されるため、使用量の確認は重要です。
 :::
+
+### プロバイダー別の比較
+
+| 項目 | OpenAI | Gemini | Claude |
+| --- | --- | --- | --- |
+| SDK | `openai` | `@google/genai` | `@anthropic-ai/sdk` |
+| モデル | `gpt-4o` | `gemini-2.5-flash` | `claude-sonnet-4-5-20250929` |
+| 入力形式 | `messages` 配列（ロール + メッセージ） | `contents`（文字列またはメッセージ配列） | `messages` 配列（ロール + メッセージ） |
+| 応答の取得 | `response.choices[0].message.content` | `response.text` | `response.content[0].text` |
+| トークン使用量 | `response.usage` | `response.usageMetadata` | `response.usage` |
+
+<Tabs groupId="llm-provider">
+<TabItem value="openai" label="OpenAI" default>
+
+OpenAI では `client.chat.completions.create()` を使い、`messages` 配列にロールとメッセージを渡します。レスポンスの `choices[0].message.content` から応答テキストを取得できます。
 
 ```typescript title="chapter3/test3-1-chat-completions-api.ts"
 import OpenAI from 'openai';
@@ -149,6 +169,114 @@ Total Tokens: 105
 Completion_tokens_details: { reasoning_tokens: 0, ... }
 Prompt_tokens_details: { cached_tokens: 0, ... }
 ```
+
+</TabItem>
+<TabItem value="gemini" label="Gemini">
+
+Gemini では `ai.models.generateContent()` を使い、`contents` に文字列を直接渡すシンプルな API です。トークン使用量は `response.usageMetadata` から取得できます。
+
+```typescript title="chapter3/test3-1-chat-completions-api-gemini.ts"
+import { GoogleGenAI } from '@google/genai';
+
+// クライアントを定義
+const ai = new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY ?? '' });
+
+/**
+ * Gemini APIを使ってテキスト生成を行い、トークン使用量を表示する
+ */
+async function main() {
+  const response = await ai.models.generateContent({
+    model: 'gemini-2.5-flash',
+    contents: 'こんにちは、今日はどんな天気ですか？',
+  });
+
+  // 応答内容を出力
+  console.log('Response:', response.text, '\n');
+
+  // 消費されたトークン数の表示
+  const usage = response.usageMetadata;
+  console.log('Prompt Tokens:', usage?.promptTokenCount);
+  console.log('Completion Tokens:', usage?.candidatesTokenCount);
+  console.log('Total Tokens:', usage?.totalTokenCount);
+}
+
+main();
+```
+
+**実行方法:**
+
+```bash
+pnpm tsx chapter3/test3-1-chat-completions-api-gemini.ts
+```
+
+**実行結果の例:**
+
+```text
+Response: こんにちは！残念ながら、私はAIなのでリアルタイムの天気情報にアクセスできません。...
+
+Prompt Tokens: 10
+Completion Tokens: 65
+Total Tokens: 75
+```
+
+</TabItem>
+<TabItem value="claude" label="Claude">
+
+Claude では `client.messages.create()` を使います。`max_tokens`（最大生成トークン数）が必須パラメータである点が OpenAI との違いです。応答は `response.content` 配列の最初の要素から取得します。
+
+```typescript title="chapter3/test3-1-chat-completions-api-claude.ts"
+import Anthropic from '@anthropic-ai/sdk';
+
+// クライアントを定義
+const client = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY,
+});
+
+/**
+ * Claude Messages APIを使ってテキスト生成を行い、トークン使用量を表示する
+ */
+async function main() {
+  const response = await client.messages.create({
+    model: 'claude-sonnet-4-5-20250929',
+    max_tokens: 1024,
+    messages: [
+      { role: 'user', content: 'こんにちは、今日はどんな天気ですか？' },
+    ],
+  });
+
+  // 応答内容を出力
+  const textBlock = response.content[0];
+  console.log(
+    'Response:',
+    textBlock?.type === 'text' ? textBlock.text : '',
+    '\n',
+  );
+
+  // 消費されたトークン数の表示
+  console.log('Input Tokens:', response.usage.input_tokens);
+  console.log('Output Tokens:', response.usage.output_tokens);
+}
+
+main();
+```
+
+**実行方法:**
+
+```bash
+pnpm tsx chapter3/test3-1-chat-completions-api-claude.ts
+```
+
+**実行結果の例:**
+
+```text
+Response: こんにちは！申し訳ありませんが、私はリアルタイムの天気情報にアクセスできません。...
+
+Input Tokens: 20
+Output Tokens: 70
+```
+
+</TabItem>
+</Tabs>
 
 ## 3-2. Embeddings API
 
@@ -205,11 +333,28 @@ cos(A, B) = (A・B) / (|A| × |B|)
 
 このサンプルでは以下を行います。
 
-- Embeddings API で単一テキストをベクトル化し、モデル名・次元数・トークン使用量を確認
-- `input` に文字列の配列を渡すことで、3 つのテキスト（ほぼ同じ意味 / やや関連 / 無関係）をまとめてベクトル化（バッチ処理）
+- Embeddings API で単一テキストをベクトル化し、次元数・トークン使用量を確認
+- 3 つのテキスト（ほぼ同じ意味 / やや関連 / 無関係）をベクトル化
 - 基準テキストとのコサイン類似度を計算し、意味の近さを数値で比較
 
-レスポンスの `response.data` は埋め込みオブジェクトの配列で、各要素の `.embedding` プロパティに `number[]` 型のベクトルが格納されています。
+:::info Claude の Embeddings API について
+Anthropic（Claude）は独自の Embeddings API を提供していません。Claude を使ったシステムで Embeddings が必要な場合は、OpenAI や Google の Embeddings API、またはオープンソースのモデル（Sentence Transformers など）を組み合わせて使用してください。
+:::
+
+### プロバイダー別の比較
+
+| 項目 | OpenAI | Gemini |
+| --- | --- | --- |
+| SDK | `openai` | `@google/genai` |
+| モデル | `text-embedding-3-small` | `gemini-embedding-001` |
+| デフォルト次元数 | 1536 | 3072 |
+| バッチ処理 | `input` に文字列配列を指定 | 1 件ずつ `embedContent` を呼び出し |
+| 応答の取得 | `response.data[i].embedding` | `response.embeddings[i].values` |
+
+<Tabs groupId="llm-provider">
+<TabItem value="openai" label="OpenAI" default>
+
+OpenAI では `input` に文字列配列を渡すことで、複数テキストを 1 回の API コールでまとめてベクトル化（バッチ処理）できます。レスポンスの `response.data` は埋め込みオブジェクトの配列で、各要素の `.embedding` プロパティに `number[]` 型のベクトルが格納されています。
 
 ```typescript title="chapter3/test3-2-embeddings-api.ts"
 import OpenAI from 'openai';
@@ -308,6 +453,114 @@ pnpm tsx chapter3/test3-2-embeddings-api.ts
 テキスト: "今日の東京の天気は晴れで、気温は25度です"
 類似度:   0.3891
 ```
+
+</TabItem>
+<TabItem value="gemini" label="Gemini">
+
+Gemini では `ai.models.embedContent()` を使います。デフォルトの次元数は 3072 で、OpenAI（1536）より高次元です。複数テキストのバッチ処理は 1 件ずつ呼び出す形になります。
+
+```typescript title="chapter3/test3-2-embeddings-api-gemini.ts"
+import { GoogleGenAI } from '@google/genai';
+
+// クライアントを定義
+const ai = new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY ?? '' });
+
+/**
+ * 2つのベクトル間のコサイン類似度を計算する
+ * @param vecA - 比較元のベクトル
+ * @param vecB - 比較先のベクトル
+ * @returns コサイン類似度（-1〜1の値）
+ */
+function cosineSimilarity(vecA: number[], vecB: number[]): number {
+  if (vecA.length !== vecB.length) {
+    throw new Error('ベクトルの次元数が一致しません');
+  }
+  let dotProduct = 0;
+  let normA = 0;
+  let normB = 0;
+  for (let i = 0; i < vecA.length; i++) {
+    dotProduct += (vecA[i] ?? 0) * (vecB[i] ?? 0);
+    normA += (vecA[i] ?? 0) * (vecA[i] ?? 0);
+    normB += (vecB[i] ?? 0) * (vecB[i] ?? 0);
+  }
+  return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+/**
+ * Gemini Embeddings APIでテキストをベクトル化し、コサイン類似度を比較する
+ */
+async function main() {
+  // --- 1. 基本的な Embeddings API 呼び出し ---
+  const response = await ai.models.embedContent({
+    model: 'gemini-embedding-001',
+    contents: 'AIエージェントは自律的にタスクを実行するシステムです',
+  });
+
+  const embedding = response.embeddings?.[0]?.values ?? [];
+  console.log('--- Embeddings API 基本呼び出し ---');
+  console.log('ベクトルの次元数:', embedding.length);
+  console.log('ベクトルの先頭5要素:', embedding.slice(0, 5));
+  console.log();
+
+  // --- 2. 複数テキストの埋め込みとコサイン類似度 ---
+  const texts = [
+    'AIエージェントは自律的にタスクを実行するプログラムです', // 類似テキスト
+    '機械学習モデルを使って自動化されたワークフローを構築する', // やや類似
+    '今日の東京の天気は晴れで、気温は25度です', // 無関係なテキスト
+  ];
+
+  console.log('--- コサイン類似度の比較 ---');
+  console.log(
+    '基準テキスト: "AIエージェントは自律的にタスクを実行するシステムです"',
+  );
+  console.log();
+
+  for (let i = 0; i < texts.length; i++) {
+    const batchResponse = await ai.models.embedContent({
+      model: 'gemini-embedding-001',
+      contents: texts[i] ?? '',
+    });
+    const similarity = cosineSimilarity(
+      embedding,
+      batchResponse.embeddings?.[0]?.values ?? [],
+    );
+    console.log(`テキスト: "${texts[i]}"`);
+    console.log(`類似度:   ${similarity.toFixed(4)}`);
+    console.log();
+  }
+}
+
+main();
+```
+
+**実行方法:**
+
+```bash
+pnpm tsx chapter3/test3-2-embeddings-api-gemini.ts
+```
+
+**実行結果の例:**
+
+```text
+--- Embeddings API 基本呼び出し ---
+ベクトルの次元数: 3072
+ベクトルの先頭5要素: [ 0.0012, -0.0345, 0.0678, -0.0123, 0.0456 ]
+
+--- コサイン類似度の比較 ---
+基準テキスト: "AIエージェントは自律的にタスクを実行するシステムです"
+
+テキスト: "AIエージェントは自律的にタスクを実行するプログラムです"
+類似度:   0.9312
+
+テキスト: "機械学習モデルを使って自動化されたワークフローを構築する"
+類似度:   0.7523
+
+テキスト: "今日の東京の天気は晴れで、気温は25度です"
+類似度:   0.3745
+```
+
+</TabItem>
+</Tabs>
 
 意味が近いテキストほどコサイン類似度が高くなっていることが確認できます。「システム」と「プログラム」のように表現が異なっていても、意味が近ければ高い類似度を示すのが Embeddings の特徴です。
 
@@ -416,7 +669,7 @@ JSON モードでは出力が有効な JSON であることは保証されます
 ## 3-4. Structured Outputs
 
 Structured Outputs は、3-3 で紹介した JSON モードの進化版です。
-JSON モードではスキーマの遵守が保証されませんでしたが、Structured Outputs では [Zod](https://zod.dev/)（TypeScript ファーストのスキーマバリデーションライブラリ）でスキーマを定義し、`zodResponseFormat` ヘルパーを使うことで、モデルの出力がスキーマに 100% 準拠することが保証されます。
+JSON モードではスキーマの遵守が保証されませんでしたが、Structured Outputs ではスキーマを定義してモデルに渡すことで、出力がスキーマに準拠することが保証されます。
 型安全なデータ抽出や、構造化された情報の取得に最適です。
 
 ### 出力形式の比較: テキスト vs JSON モード vs Structured Outputs
@@ -427,15 +680,10 @@ JSON モードではスキーマの遵守が保証されませんでしたが、
 | --- | --- | --- | --- |
 | 出力形式 | 自由形式テキスト | 有効な JSON | スキーマ準拠の JSON |
 | スキーマ保証 | なし | JSON として有効なことのみ | 100% スキーマ準拠 |
-| 型安全性 | なし | なし（手動パースが必要） | あり（`parsed` から型付きオブジェクトを取得） |
+| 型安全性 | なし | なし（手動パースが必要） | あり（型付きオブジェクトを取得可能） |
 | 主なユースケース | 自然言語の応答生成 | 簡易的な構造化データ取得 | 厳密な構造化データ抽出 |
-| 設定方法 | 指定不要 | `response_format: { type: "json_object" }` | `zodResponseFormat(schema, name)` |
 
-このサンプルでは以下のポイントを示しています。
-
-- Zod でレシピのスキーマ（名前・人数・材料・手順）を定義
-- `client.chat.completions.parse()` で型安全なパース結果を取得
-- `response.choices[0].message.parsed` から直接型付きオブジェクトにアクセス
+このサンプルでは、レシピのスキーマ（名前・人数・材料・手順）を定義し、モデルからスキーマに準拠した構造化データを取得します。
 
 ### temperature パラメータとは？
 
@@ -451,6 +699,20 @@ JSON モードではスキーマの遵守が保証されませんでしたが、
 内部的には、モデルが次のトークン（単語の断片）を選ぶ際の確率分布を調整しています。`temperature` が低いほど確率の高いトークンが選ばれやすくなり、高いほど確率の低いトークンも選ばれる可能性が増します。
 
 このサンプルでは `temperature: 0` を指定しているため、毎回ほぼ同じレシピが生成されます。レシピの構造化データを安定して取得したい場合に適した設定です。
+
+### プロバイダー別のスキーマ指定方法
+
+| 項目 | OpenAI | Gemini | Claude |
+| --- | --- | --- | --- |
+| SDK | `openai` | `@google/genai` | `@anthropic-ai/sdk` |
+| スキーマ形式 | Zod + `zodResponseFormat` | `Type` enum による JSON Schema 風定義 | JSON Schema を直接指定 |
+| 設定方法 | `response_format: zodResponseFormat(schema, name)` | `config.responseMimeType` + `config.responseSchema` | `output_config.format` に `json_schema` を指定 |
+| パース方法 | `message.parsed` で型付きオブジェクト取得 | `JSON.parse(response.text ?? '{}')` で手動パース | `JSON.parse(content[0].text)` で手動パース |
+
+<Tabs groupId="llm-provider">
+<TabItem value="openai" label="OpenAI" default>
+
+OpenAI では [Zod](https://zod.dev/)（TypeScript ファーストのスキーマバリデーションライブラリ）でスキーマを定義し、`zodResponseFormat` ヘルパーを使います。`client.chat.completions.parse()` を使うと、レスポンスの `message.parsed` から型付きオブジェクトを直接取得できます。
 
 :::tip create() と parse() の違い
 3-1 や 3-3 では `client.chat.completions.create()` を使いましたが、Structured Outputs では `client.chat.completions.parse()` を使います。`parse()` は OpenAI SDK が提供する拡張メソッドで、レスポンスの `message.parsed` プロパティから Zod スキーマに基づいた**型付きオブジェクト**を直接取得できます。`create()` では `message.content` が文字列として返されるため、手動で `JSON.parse()` する必要があります。
@@ -508,6 +770,156 @@ Servings: 2
 Ingredients: [ 'ひき肉 200g', 'レタス 2枚', 'トマト 1個', 'チーズ 適量', ... ]
 Steps: [ '1. ひき肉をフライパンで炒める', '2. タコスシーズニングを加える', ... ]
 ```
+
+</TabItem>
+<TabItem value="gemini" label="Gemini">
+
+Gemini では `config.responseMimeType` を `'application/json'` に設定し、`config.responseSchema` で `Type` enum を使ってスキーマを定義します。レスポンスは `JSON.parse(response.text ?? '{}')` で手動パースします。
+
+```typescript title="chapter3/test3-4-structured-outputs-gemini.ts"
+import { GoogleGenAI, Type } from '@google/genai';
+
+// クライアントを定義
+const ai = new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY ?? '' });
+
+/**
+ * Gemini APIのStructured Outputsを使ってJSON形式でレシピ情報を取得する
+ */
+async function main() {
+  // Structured Outputsに対応するスキーマを指定して呼び出し
+  const response = await ai.models.generateContent({
+    model: 'gemini-2.5-flash',
+    contents: 'タコライスのレシピを教えてください',
+    config: {
+      temperature: 0,
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          name: { type: Type.STRING, description: 'レシピ名' },
+          servings: { type: Type.INTEGER, description: '何人前か' },
+          ingredients: {
+            type: Type.ARRAY,
+            items: { type: Type.STRING },
+            description: '材料リスト',
+          },
+          steps: {
+            type: Type.ARRAY,
+            items: { type: Type.STRING },
+            description: '手順リスト',
+          },
+        },
+        required: ['name', 'servings', 'ingredients', 'steps'],
+      },
+    },
+  });
+
+  // 生成されたレシピ情報の表示
+  const recipe = JSON.parse(response.text ?? '{}');
+
+  console.log('Recipe Name:', recipe.name);
+  console.log('Servings:', recipe.servings);
+  console.log('Ingredients:', recipe.ingredients);
+  console.log('Steps:', recipe.steps);
+}
+
+main();
+```
+
+**実行方法:**
+
+```bash
+pnpm tsx chapter3/test3-4-structured-outputs-gemini.ts
+```
+
+**実行結果の例:**
+
+```text
+Recipe Name: タコライス
+Servings: 2
+Ingredients: [ '合い挽き肉 200g', 'レタス 3枚', 'トマト 1個', 'チーズ 50g', ... ]
+Steps: [ 'フライパンで合い挽き肉を炒める', 'タコスシーズニングで味付けする', ... ]
+```
+
+</TabItem>
+<TabItem value="claude" label="Claude">
+
+Claude では `output_config.format` に `json_schema` タイプと JSON Schema を直接指定します。レスポンスは `JSON.parse()` で手動パースします。
+
+```typescript title="chapter3/test3-4-structured-outputs-claude.ts"
+import Anthropic from '@anthropic-ai/sdk';
+
+// クライアントを定義
+const client = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY,
+});
+
+/**
+ * Claude APIのStructured Outputsを使ってJSON形式でレシピ情報を取得する
+ */
+async function main() {
+  // Structured Outputsに対応するJSON Schemaを指定して呼び出し
+  const response = await client.messages.create({
+    model: 'claude-sonnet-4-5-20250929',
+    max_tokens: 1024,
+    messages: [{ role: 'user', content: 'タコライスのレシピを教えてください' }],
+    output_config: {
+      format: {
+        type: 'json_schema',
+        schema: {
+          type: 'object',
+          properties: {
+            name: { type: 'string', description: 'レシピ名' },
+            servings: { type: 'integer', description: '何人前か' },
+            ingredients: {
+              type: 'array',
+              items: { type: 'string' },
+              description: '材料リスト',
+            },
+            steps: {
+              type: 'array',
+              items: { type: 'string' },
+              description: '手順リスト',
+            },
+          },
+          required: ['name', 'servings', 'ingredients', 'steps'],
+        },
+      },
+    },
+  });
+
+  // 生成されたレシピ情報の表示
+  const textBlock = response.content[0];
+  const recipe = JSON.parse(
+    textBlock?.type === 'text' ? textBlock.text : '{}',
+  );
+
+  console.log('Recipe Name:', recipe.name);
+  console.log('Servings:', recipe.servings);
+  console.log('Ingredients:', recipe.ingredients);
+  console.log('Steps:', recipe.steps);
+}
+
+main();
+```
+
+**実行方法:**
+
+```bash
+pnpm tsx chapter3/test3-4-structured-outputs-claude.ts
+```
+
+**実行結果の例:**
+
+```text
+Recipe Name: タコライス
+Servings: 2
+Ingredients: [ '合いびき肉 200g', 'レタス 2枚', 'トマト 1個', 'ピザ用チーズ 50g', ... ]
+Steps: [ 'ひき肉をフライパンで炒め、タコスシーズニングで味付けする', ... ]
+```
+
+</TabItem>
+</Tabs>
 
 ## 3-5. Responses API
 
@@ -693,64 +1105,69 @@ Response ID: resp_def456
 
 ここまでの 3-1 〜 3-4 では、モデルへの入出力形式について学びました。ここからは、モデルが **外部の世界と連携する** 方法を見ていきます。
 
-Function Calling は、モデルが外部の関数（ツール）を呼び出せるようにする仕組みです。
+Function Calling（ツール使用）は、モデルが外部の関数（ツール）を呼び出せるようにする仕組みです。
 [Chapter 2](./chapter2.md) で解説した「ツール」コンポーネントを API レベルで実現するための中核的な機能であり、AI エージェント開発において最も重要な概念の 1 つです。
 
 モデル自体が関数を実行するわけではなく、「この関数をこの引数で呼ぶべき」という指示を JSON 形式で返します。アプリケーション側で実際の関数を実行し、その結果をモデルに返すことで、外部データを活用した応答を生成できます。
 
 たとえば、「東京の天気を教えて」というユーザーの質問に対して、モデルは `get_weather` 関数を `{"location": "Tokyo"}` という引数で呼ぶべきだと判断します。アプリケーションが実際に天気情報を取得してモデルに返すと、モデルはその情報を元に自然言語で応答を生成します。
 
-### tools パラメータの構造
-
-`tools` パラメータには、モデルに提供する関数の定義を配列で渡します。各関数の定義は以下の構造を持ちます。
-
-| フィールド | 説明 |
-| --- | --- |
-| `type` | ツールの種類。現在は `"function"` のみ |
-| `function.name` | 関数名。モデルが呼び出す際の識別子として使用 |
-| `function.description` | 関数の説明。モデルがどの関数を呼ぶか判断する際に参照される |
-| `function.parameters` | JSON Schema 形式で定義する引数のスキーマ |
-
-`description` はモデルの判断精度に大きく影響します。関数が「いつ・何のために使われるか」を具体的に記述することが重要です。
-
 ### 処理の流れ
 
 このサンプルでは以下の流れを実装しています。
 
-1. **ツールの定義** - `get_weather` 関数のスキーマを `tools` パラメータで定義
-2. **初回リクエスト** - ユーザーメッセージを送信し、モデルが `tool_calls` を返す
+1. **ツールの定義** - `get_weather` 関数のスキーマを定義
+2. **初回リクエスト** - ユーザーメッセージを送信し、モデルが関数呼び出しを返す
 3. **関数の実行** - モデルが指定した引数で `getWeather()` を実行
-4. **結果の返却** - 関数の実行結果を `role: "tool"` メッセージとして返す
+4. **結果の返却** - 関数の実行結果をモデルに返す
 5. **最終応答** - モデルが関数の結果を踏まえた自然言語の応答を生成
 
 ```mermaid
 sequenceDiagram
     participant User as ユーザー
     participant App as アプリケーション
-    participant Model as OpenAI モデル
+    participant Model as LLM モデル
     participant Func as get_weather 関数
 
     User->>App: 「東京の天気を教えて」
-    App->>Model: messages + tools 定義を送信
-    Model-->>App: tool_calls を返却<br/>（name: get_weather, args: {location: "Tokyo"}）
+    App->>Model: メッセージ + ツール定義を送信
+    Model-->>App: 関数呼び出しを返却<br/>（name: get_weather, args: {location: "Tokyo"}）
     App->>Func: getWeather("Tokyo") を実行
     Func-->>App: "晴れ、気温25度"
-    App->>Model: role: "tool" で結果を返却
+    App->>Model: 関数の実行結果を返却
     Model-->>App: 「東京の天気は晴れで、気温は25度です」
     App-->>User: 最終応答を表示
 ```
 
-:::tip tool_choice の使い分け
-`tool_choice` パラメータで、モデルの関数呼び出し動作を制御できます。
+:::caution ツール定義の description の重要性
+各プロバイダー共通で、ツール定義の `description`（説明文）はモデルがどの関数を呼ぶか判断する際に参照されます。「いつ・何のために使われるか」を具体的に記述することが、適切な関数選択の精度に大きく影響します。曖昧な説明ではモデルが誤った関数を選ぶ可能性があるため、丁寧に記述してください。
+:::
 
-| 値 | 動作 | ユースケース |
-| --- | --- | --- |
-| `"auto"` | モデルが呼ぶかどうかを自動判断 | 通常の対話（関数が不要な質問もある場合） |
-| `"required"` | 必ずいずれかの関数を呼ぶ | ツール利用が前提のワークフロー |
-| `{"type": "function", "function": {"name": "..."}}` | 特定の関数を強制呼び出し | テストや特定の処理を確実に実行したい場合 |
-| `"none"` | 関数を呼ばない | ツール定義を渡しつつも通常の応答がほしい場合 |
+### プロバイダー別の比較
+
+| 項目 | OpenAI | Gemini | Claude |
+| --- | --- | --- | --- |
+| SDK | `openai` | `@google/genai` | `@anthropic-ai/sdk` |
+| ツール定義 | `tools` 配列（`type: "function"` + JSON Schema） | `config.tools`（`functionDeclarations` + `Type` enum） | `tools` 配列（`name` + `input_schema`） |
+| 呼び出し検出 | `message.tool_calls` の有無 | `response.functionCalls` の有無 | `stop_reason === 'tool_use'` |
+| 結果の返却 | `role: "tool"` + `tool_call_id` | `functionResponse` パート | `type: "tool_result"` + `tool_use_id` |
+
+:::tip tool_choice の使い分け
+各プロバイダーでモデルの関数呼び出し動作を制御するパラメータが用意されています。
+
+| 動作 | OpenAI | Gemini | Claude |
+| --- | --- | --- | --- |
+| 自動判断（デフォルト） | `"auto"` | `AUTO` | `{ type: "auto" }` |
+| 必ず呼ぶ | `"required"` | `ANY` | `{ type: "any" }` |
+| 特定の関数を強制 | `{"type": "function", "function": {"name": "..."}}` | `allowedFunctionNames` で指定 | `{ type: "tool", name: "..." }` |
+| 呼ばない | `"none"` | `NONE` | `{ type: "none" }` |
 
 :::
+
+<Tabs groupId="llm-provider">
+<TabItem value="openai" label="OpenAI" default>
+
+OpenAI では `tools` パラメータに `type: "function"` と JSON Schema 形式のパラメータ定義を渡します。モデルが関数を呼ぶと `message.tool_calls` に呼び出し情報が入り、結果は `role: "tool"` メッセージで返します。
 
 ```typescript title="chapter3/test3-6-function-calling.ts"
 import OpenAI from 'openai';
@@ -874,6 +1291,271 @@ pnpm tsx chapter3/test3-6-function-calling.ts
 関数の引数: { location: 'Tokyo' }
 Final Response: 東京の天気は晴れで、気温は25度です。
 ```
+
+</TabItem>
+<TabItem value="gemini" label="Gemini">
+
+Gemini では `config.tools` に `functionDeclarations` を渡し、`Type` enum でパラメータを定義します。モデルが関数を呼ぶと `response.functionCalls` に呼び出し情報が入り、結果は `functionResponse` パートで返します。
+
+```typescript title="chapter3/test3-6-function-calling-gemini.ts"
+import type { Content } from '@google/genai';
+import { GoogleGenAI, Type } from '@google/genai';
+
+// クライアントを定義
+const ai = new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY ?? '' });
+
+/**
+ * 指定された都市の天気情報を返すダミー関数
+ * @param location - 都市名（例: Tokyo, Osaka, Kyoto）
+ * @returns 天気情報の文字列
+ */
+function getWeather(location: string): string {
+  const weatherInfo: Record<string, string> = {
+    Tokyo: '晴れ、気温25度',
+    Osaka: '曇り、気温22度',
+    Kyoto: '雨、気温18度',
+  };
+  return weatherInfo[location] ?? '天気情報が見つかりません';
+}
+
+// モデルに提供するToolの定義
+const getWeatherDeclaration = {
+  name: 'get_weather',
+  description: '指定された場所の天気情報を取得します',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      location: {
+        type: Type.STRING,
+        description: '都市名（例: Tokyo）',
+      },
+    },
+    required: ['location'],
+  },
+};
+
+const tools = [{ functionDeclarations: [getWeatherDeclaration] }];
+
+/**
+ * Gemini APIのFunction Callingを使って天気情報を取得する
+ */
+async function main() {
+  // モデルへの最初のAPIリクエスト
+  const response = await ai.models.generateContent({
+    model: 'gemini-2.5-flash',
+    contents: '東京の天気を教えてください',
+    config: {
+      temperature: 0,
+      tools,
+    },
+  });
+
+  console.log('モデルからの応答:');
+
+  // 関数呼び出しを処理
+  const functionCalls = response.functionCalls;
+  if (functionCalls && functionCalls.length > 0) {
+    const functionCall = functionCalls[0];
+    if (!functionCall) return;
+    console.log('関数名:', functionCall.name);
+    console.log('関数の引数:', functionCall.args);
+
+    const weatherResponse = getWeather(functionCall.args?.location as string);
+
+    // 関数の実行結果をモデルに返す
+    const contents: Content[] = [
+      { role: 'user', parts: [{ text: '東京の天気を教えてください' }] },
+      {
+        role: 'model',
+        parts: [
+          {
+            functionCall: {
+              name: functionCall.name ?? '',
+              args: functionCall.args ?? {},
+            },
+          },
+        ],
+      },
+      {
+        role: 'user',
+        parts: [
+          {
+            functionResponse: {
+              name: functionCall.name ?? '',
+              response: { result: weatherResponse },
+            },
+          },
+        ],
+      },
+    ];
+    const finalResponse = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents,
+      config: {
+        temperature: 0,
+        tools,
+      },
+    });
+
+    console.log('Final Response:', finalResponse.text);
+  } else {
+    console.log('モデルによるツール呼び出しはありませんでした。');
+    console.log('Response:', response.text);
+  }
+}
+
+main();
+```
+
+**実行方法:**
+
+```bash
+pnpm tsx chapter3/test3-6-function-calling-gemini.ts
+```
+
+**実行結果の例:**
+
+```text
+モデルからの応答:
+関数名: get_weather
+関数の引数: { location: 'Tokyo' }
+Final Response: 東京の天気は晴れで、気温は25度です。
+```
+
+</TabItem>
+<TabItem value="claude" label="Claude">
+
+Claude では `tools` 配列に `name`、`description`、`input_schema` を持つオブジェクトを渡します。モデルが関数を呼ぶと `stop_reason` が `'tool_use'` になり、`content` 配列内の `tool_use` ブロックに呼び出し情報が入ります。結果は `tool_result` メッセージで返します。
+
+```typescript title="chapter3/test3-6-function-calling-claude.ts"
+import Anthropic from '@anthropic-ai/sdk';
+
+// クライアントを定義
+const client = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY,
+});
+
+/**
+ * 指定された都市の天気情報を返すダミー関数
+ * @param location - 都市名（例: Tokyo, Osaka, Kyoto）
+ * @returns 天気情報の文字列
+ */
+function getWeather(location: string): string {
+  const weatherInfo: Record<string, string> = {
+    Tokyo: '晴れ、気温25度',
+    Osaka: '曇り、気温22度',
+    Kyoto: '雨、気温18度',
+  };
+  return weatherInfo[location] ?? '天気情報が見つかりません';
+}
+
+// モデルに提供するToolの定義
+const tools: Anthropic.Messages.Tool[] = [
+  {
+    name: 'get_weather',
+    description: '指定された場所の天気情報を取得します',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        location: {
+          type: 'string',
+          description: '都市名（例: Tokyo）',
+        },
+      },
+      required: ['location'],
+    },
+  },
+];
+
+/**
+ * Claude APIのFunction Callingを使って天気情報を取得する
+ */
+async function main() {
+  // 初回のユーザーメッセージ
+  const messages: Anthropic.Messages.MessageParam[] = [
+    { role: 'user', content: '東京の天気を教えてください' },
+  ];
+
+  // モデルへの最初のAPIリクエスト
+  const response = await client.messages.create({
+    model: 'claude-sonnet-4-5-20250929',
+    max_tokens: 1024,
+    messages,
+    tools,
+  });
+
+  console.log('モデルからの応答:');
+  console.log('stop_reason:', response.stop_reason);
+
+  // 関数呼び出しを処理
+  if (response.stop_reason === 'tool_use') {
+    const toolUseBlock = response.content.find(
+      (block) => block.type === 'tool_use',
+    );
+
+    if (toolUseBlock && toolUseBlock.type === 'tool_use') {
+      console.log('関数名:', toolUseBlock.name);
+      console.log('関数の引数:', toolUseBlock.input);
+
+      const weatherResponse = getWeather(
+        (toolUseBlock.input as { location: string }).location,
+      );
+
+      // 関数の実行結果をモデルに返す
+      const finalResponse = await client.messages.create({
+        model: 'claude-sonnet-4-5-20250929',
+        max_tokens: 1024,
+        messages: [
+          ...messages,
+          { role: 'assistant', content: response.content },
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: toolUseBlock.id,
+                content: weatherResponse,
+              },
+            ],
+          },
+        ],
+        tools,
+      });
+
+      const textBlock = finalResponse.content.find(
+        (block) => block.type === 'text',
+      );
+      console.log(
+        'Final Response:',
+        textBlock?.type === 'text' ? textBlock.text : '',
+      );
+    }
+  } else {
+    console.log('モデルによるツール呼び出しはありませんでした。');
+  }
+}
+
+main();
+```
+
+**実行方法:**
+
+```bash
+pnpm tsx chapter3/test3-6-function-calling-claude.ts
+```
+
+**実行結果の例:**
+
+```text
+モデルからの応答:
+stop_reason: tool_use
+関数名: get_weather
+関数の引数: { location: 'Tokyo' }
+Final Response: 東京の天気は晴れで、気温は25度です。
+```
+
+</TabItem>
+</Tabs>
 
 ## 3-7. Tavily Search
 
@@ -2058,7 +2740,7 @@ return {
 
 ## まとめ
 
-この章では、AI エージェントを構築するために必要な OpenAI API の基本操作を、段階的に学びました。
+この章では、AI エージェントを構築するために必要な LLM API の基本操作を、OpenAI を中心に Google Gemini・Anthropic Claude も交えながら段階的に学びました。
 
 | カテゴリ | セクション | 学んだこと |
 | --- | --- | --- |
@@ -2081,6 +2763,11 @@ return {
 - OpenAI. [Responses vs Chat Completions](https://platform.openai.com/docs/guides/responses-vs-chat-completions) - Responses API と Chat Completions API の比較ガイド（3-5 参考）
 - OpenAI. [Function Calling](https://platform.openai.com/docs/guides/function-calling) - Function Calling の公式ドキュメント（3-6）
 - [openai (npm)](https://www.npmjs.com/package/openai) - OpenAI 公式 Node.js / TypeScript SDK（3-1, 3-3, 3-4, 3-5, 3-6, 3-11）
+- Google. [Gemini API ドキュメント](https://ai.google.dev/gemini-api/docs) - Gemini API の公式ガイド（3-1, 3-2, 3-4, 3-6）
+- [@google/genai (npm)](https://www.npmjs.com/package/@google/genai) - Google AI 公式 Node.js / TypeScript SDK（3-1, 3-2, 3-4, 3-6）
+- Anthropic. [Messages API](https://docs.anthropic.com/en/api/messages) - Claude Messages API の公式リファレンス（3-1, 3-4, 3-6）
+- Anthropic. [Tool use](https://docs.anthropic.com/en/docs/build-with-claude/tool-use) - Claude のツール使用（Function Calling）ガイド（3-6）
+- [@anthropic-ai/sdk (npm)](https://www.npmjs.com/package/@anthropic-ai/sdk) - Anthropic 公式 Node.js / TypeScript SDK（3-1, 3-4, 3-6）
 - [Zod](https://zod.dev/) - TypeScript ファーストのスキーマバリデーションライブラリ（3-4, 3-8, 3-11）
 - [Tavily](https://docs.tavily.com/) - AI エージェント向け Web 検索 API の公式ドキュメント（3-7）
 - [LangChain Tools](https://js.langchain.com/docs/how_to/custom_tools/) - LangChain カスタム Tool の公式ドキュメント（3-8）
