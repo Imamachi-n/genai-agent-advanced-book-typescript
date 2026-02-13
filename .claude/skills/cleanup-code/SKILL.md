@@ -18,14 +18,18 @@ TypeScript ファイルのパスを受け取り、型エラー修正・非推奨
 
 ### Step 2: 型エラーの修正
 
-1. `npx tsc --noEmit <ファイルパス>` を実行し、**対象ファイル自体**の型エラーのみを抽出する（`node_modules` 内のエラーは無視する）
+1. `npx tsc --noEmit --skipLibCheck --pretty 2>&1 | grep -E "<対象ファイル名>"` でプロジェクト全体をビルドし、対象ファイルのエラーのみ抽出する
+   - 単一ファイル指定（`npx tsc --noEmit <ファイルパス>`）はプロジェクトの tsconfig が無視される場合があるため使わない
+   - `--skipLibCheck` で `node_modules` 内のエラーを除外する
 2. 型エラーがある場合、エラー内容を分析して修正する
 3. 修正パターンの例:
-   - 型アサーションの不要・誤りによるエラー → 型アサーションの削除・修正
+   - `Object is possibly 'undefined'`（TS2532）→ オプショナルチェーン（`?.`）+ Nullish Coalescing（`??`）で対応する
+   - ユニオン型でプロパティにアクセスできない（TS2339）→ 判別プロパティで型を絞り込む（例: `role === 'assistant'`、`type === 'function'`）
    - 引数の型不一致 → 正しい型への修正
    - 存在しないプロパティへのアクセス → プロパティ名の修正
    - `import type` と `import` の使い分け誤り → 適切な import 形式に修正
-4. 修正後に再度 `npx tsc --noEmit` で型エラーが解消されたことを確認する
+4. 修正後に再度型チェックコマンドで型エラーが解消されたことを確認する
+5. 型変更により呼び出し元（テストファイル等）にもエラーが波及する場合がある。ディレクトリ全体でも grep して確認する
 
 ### Step 3: 非推奨 API の検出・置換
 
@@ -69,27 +73,58 @@ TypeScript ファイルのパスを受け取り、型エラー修正・非推奨
 
 ### Step 6: 最終確認
 
-1. `npx tsc --noEmit <ファイルパス>` で対象ファイルの型エラーがないことを最終確認する
-2. ファイルの整形が崩れていないか確認する
+1. `npx tsc --noEmit --skipLibCheck --pretty 2>&1 | grep -E "<対象ファイル名>"` で対象ファイルの型エラーがないことを最終確認する
+2. 呼び出し元のファイル（テストファイル等）にもエラーが波及していないか、ディレクトリ全体で確認する
+3. ファイルの整形が崩れていないか確認する
 
 ## 修正時のルール
 
 - ロジックの変更は行わない（型アノテーションや import の整理のみ）
 - 既存のコードスタイル（インデント・クォート・セミコロン等）を維持する
 - 不確実な修正は行わず、ユーザーに確認を取る
-- 非 null アサーション（感嘆符）は使用禁止。代わりにオプショナルチェーン（ ?. ）や Nullish Coalescing（ ?? デフォルト値 ）を使う。具体例:
+- `any` 型は使わない。代わりにライブラリが提供する型（例: `StructuredToolInterface`）や `unknown` + 型ガードを使う
+- 型アサーション（`as X`）は使わない。代わりに判別プロパティによる型の絞り込み（discriminated union narrowing）を使う
+- 非 null アサーション（感嘆符）は使わない。代わりにオプショナルチェーン（`?.`）や Nullish Coalescing（`??`）を使う
+- `undefined` の可能性がある値に対して `throw` によるガード節は使わない。`?.` と `??` で対応する
 
 ```typescript
-// NG: 非 null アサーション
-obj.prop!
-arr[0]!
-response.data!.value!
+// NG: any 型
+type Foo = { invoke(input: any): Promise<any> };
+
+// OK: ライブラリ型 or unknown
+import type { StructuredToolInterface } from '@langchain/core/tools';
+type Foo = { invoke(input: Record<string, unknown>): Promise<unknown> };
+
+// NG: 型アサーション
+(lastMessage as any).tool_calls
+openaiTools as any
+
+// OK: 判別プロパティで型を絞り込む
+if (lastMessage?.role === 'assistant' && 'tool_calls' in lastMessage) {
+  lastMessage.tool_calls; // 型が絞り込まれる
+}
+if (toolCall.type === 'function') {
+  toolCall.function.name; // 型が絞り込まれる
+}
+
+// NG: 非 null アサーション / throw ガード
+response.choices[0]!.message.content
+const choice = response.choices[0];
+if (!choice) throw new Error('...');
 
 // OK: オプショナルチェーン + Nullish Coalescing
-obj.prop ?? デフォルト値
-if (!arr[0]) return; // ガード節で対応
-response.data?.value ?? デフォルト値
+response.choices[0]?.message.content ?? ''
+state.plan[state.currentStep] ?? ''
 ```
+
+## SKILL.md 記述時の注意
+
+このファイルの内容はシェル（zsh）で評価される場合がある。以下の文字はコードブロックの外では使わないこと。
+
+- `**` → zsh の再帰 glob として展開される（マークダウンの太字には使わない）
+- 感嘆符 → zsh の history expansion として解釈される（コードブロック内のみ可）
+- `$(...)` → コマンド置換として実行される
+- バッククォート連続 → コマンド置換として実行される場合がある
 
 ## 出力
 

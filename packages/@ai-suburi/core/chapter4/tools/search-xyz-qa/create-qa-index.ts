@@ -7,7 +7,11 @@ import { openDatabase } from '../db.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.resolve(__dirname, '../data');
 
-// CSVファイルを読み込み、各行を {Q, A} のオブジェクトとして返す
+/**
+ * CSVファイルを読み込み、各行を Q&A オブジェクトとして返す
+ * @param filePath - 読み込むCSVファイルのパス
+ * @returns Q&A オブジェクトの配列
+ */
 function loadCsv(filePath: string): Array<{ q: string; a: string }> {
   const text = fs.readFileSync(filePath, 'utf-8');
   const lines = text.split('\n').filter((line) => line.trim().length > 0);
@@ -15,7 +19,7 @@ function loadCsv(filePath: string): Array<{ q: string; a: string }> {
   // ヘッダー行をスキップ
   const rows: Array<{ q: string; a: string }> = [];
   for (let i = 1; i < lines.length; i++) {
-    const line = lines[i]!;
+    const line = lines[i] ?? '';
     // 最初のカンマで分割（A列にカンマが含まれる可能性があるため）
     const commaIndex = line.indexOf(',');
     if (commaIndex === -1) continue;
@@ -26,7 +30,12 @@ function loadCsv(filePath: string): Array<{ q: string; a: string }> {
   return rows;
 }
 
-// OpenAI API で embedding ベクトルを生成する
+/**
+ * OpenAI API で embedding ベクトルを生成する
+ * @param client - OpenAI クライアント
+ * @param text - embedding を生成するテキスト
+ * @returns embedding ベクトル
+ */
 async function generateEmbedding(
   client: OpenAI,
   text: string,
@@ -35,10 +44,12 @@ async function generateEmbedding(
     model: 'text-embedding-3-small',
     input: text,
   });
-  return response.data[0]!.embedding;
+  return response.data[0]?.embedding ?? [];
 }
 
-// CSVファイルを読み込み、embeddingを生成してDBに投入する
+/**
+ * CSVファイルを読み込み、embeddingを生成してDBに投入する
+ */
 export async function createQaIndex(): Promise<void> {
   const db = openDatabase();
 
