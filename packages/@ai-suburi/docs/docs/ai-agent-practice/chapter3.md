@@ -572,6 +572,165 @@ pnpm tsx chapter3/test3-2-embeddings-api-gemini.ts
 
 意味が近いテキストほどコサイン類似度が高くなっていることが確認できます。「システム」と「プログラム」のように表現が異なっていても、意味が近ければ高い類似度を示すのが Embeddings の特徴です。
 
+:::info コラム: Embeddings API の背後にある技術
+
+Embeddings API は、単にテキストを数値ベクトルに変換するだけの「ブラックボックス」ではありません。その背後には、自然言語処理（NLP）分野における複数の重要な技術革新が積み重なっています。このセクションでは、Embeddings API を支える主要な技術要素について解説します。
+
+#### Self Attention（自己注意機構）
+
+Self Attention は、Transformer アーキテクチャの中核をなすメカニズムです。従来の RNN（再帰型ニューラルネットワーク）が文章を前から順番に処理していたのに対し、Self Attention は文章内のすべての単語が互いに「どれだけ関連しているか」を同時に計算します。
+
+たとえば「猫がマットの上で寝ている」という文があるとき、Self Attention は以下のように動作します。
+
+- 「上」という単語を理解する際、「マット」との関係性を強く認識（マットの「上」）
+- 「猫」や「寝ている」との関係性も同時に考慮
+- 文脈に応じて、各単語ペア間の「重要度スコア」を計算
+
+これにより、文中の長距離依存関係も効率的に捉えられるようになりました。長距離依存関係とは、離れた位置にある単語同士の関係を指します。
+
+**Self Attention の主な利点:**
+
+| 特徴 | 従来の RNN | Self Attention |
+| --- | --- | --- |
+| 処理方法 | 順次処理（逐次的） | 並列処理（全単語を同時に参照） |
+| 長距離依存 | 苦手（情報が減衰） | 得意（直接的に関係を計算） |
+| 計算速度 | 遅い | 高速（並列化が容易） |
+
+#### Transformer アーキテクチャ
+
+Transformer は、2017 年に Google が発表した「Attention is All You Need」論文で提唱されたモデルアーキテクチャです。Self Attention を多層に重ねた構造を持ち、RNN や CNN（畳み込みニューラルネットワーク）を使いません。Attention のみで高精度な言語理解を実現しました。
+
+Transformer の基本構造は以下の通りです。
+
+```mermaid
+flowchart TB
+    Input["入力テキスト"] --> Embed["単語埋め込み + 位置エンコーディング"]
+    Embed --> Enc["Encoder<br/>（Self Attention + Feed Forward）<br/>× N 層"]
+    Enc --> Dec["Decoder<br/>（Self Attention + Cross Attention + Feed Forward）<br/>× N 層"]
+    Dec --> Output["出力（翻訳・生成など）"]
+
+    style Enc fill:#e3f2fd
+    style Dec fill:#fff3e0
+```
+
+**Transformer の構成要素:**
+
+- **Encoder（エンコーダー）** — 入力テキストを文脈を考慮したベクトル表現に変換
+- **Decoder（デコーダー）** — エンコーダーの出力をもとに、出力テキストを生成
+- **Multi-Head Attention** — 複数の Self Attention を並列実行し、異なる視点から文脈を捉える
+- **Position Encoding** — 単語の順序情報を埋め込む（Self Attention は順序を考慮しないため）
+
+Embeddings API で使われるモデルは、主に Transformer の **Encoder 部分** を活用しています。
+
+#### BERT（Bidirectional Encoder Representations from Transformers）
+
+BERT は、Google が 2018 年に発表した Transformer ベースの事前学習モデルです。Embeddings API や多くの NLP タスクの基盤技術として広く使われています。
+
+**BERT の革新的な点:**
+
+1. **双方向の文脈理解** — 従来のモデルは左から右（または右から左）の一方向のみで文章を読んでいましたが、BERT は **前後両方向から** 文脈を理解します
+   - 例:「私は銀行に行った」という文で、「銀行」の前後を同時に見て、「金融機関の銀行」なのか「川の土手（bank）」なのかを判断
+2. **事前学習 + Fine-tuning** — 大規模なテキストコーパス（Wikipedia など）で事前学習を行います。その後、特定のタスク（感情分析、質問応答など）で追加学習（Fine-tuning）を行うことで、少ないデータでも高精度を実現します
+3. **汎用性** — 事前学習済みモデルをそのまま使うだけで、多様な NLP タスクに適用可能
+
+**BERT の学習タスク:**
+
+BERT は以下の 2 つのタスクで事前学習されます。
+
+- **Masked Language Model（MLM）** — 文中の一部の単語をマスク（隠して）して、その単語を予測するタスク
+  - 例:「私は [MASK] に行った」→「銀行」を予測
+- **Next Sentence Prediction（NSP）** — 2 つの文が連続しているかを判定するタスク
+  - 例:「今日は晴れだ。」「公園に行こう。」→ 連続している（True）
+
+#### Sentence Transformers
+
+Sentence Transformers は、BERT をベースに、**文章全体をベクトル化する**ことに特化したモデル群です。BERT は単語レベルの埋め込みを生成しますが、Sentence Transformers は文章全体の意味を 1 つのベクトルで表現します。
+
+**BERT と Sentence Transformers の違い:**
+
+| 項目 | BERT | Sentence Transformers |
+| --- | --- | --- |
+| 出力 | 各単語のベクトル（文章長に応じて可変） | 文章全体の固定長ベクトル（例: 768 次元） |
+| 主な用途 | 分類、固有表現抽出、質問応答 | 文章の類似度計算、検索、クラスタリング |
+| 類似度計算 | 単語レベルの比較が必要 | 文章レベルで直接比較可能 |
+
+**Sentence Transformers の学習手法:**
+
+Sentence Transformers は、**Siamese Network** と **Contrastive Learning** を使って学習します。
+
+- **Siamese Network（シャムネットワーク）** — 2 つの文章を**同じパラメータを持つモデル**に通し、それぞれのベクトルを生成します。意味が近い文章のベクトルは近く、意味が遠い文章のベクトルは遠くなるように、損失関数を最小化する形で学習します
+- **Contrastive Learning（対照学習）** — 正例ペア（意味が近い: 「犬が走る」と「犬が駆ける」）と負例ペア（意味が遠い: 「犬が走る」と「今日は晴れ」）を大量に用意し、正例は距離を近づけ、負例は距離を離すように学習します。これにより、意味的な類似性を捉えたベクトル空間が構築されます
+
+代表的な Sentence Transformers モデル:
+
+- `all-MiniLM-L6-v2` — 軽量で高速、384 次元
+- `all-mpnet-base-v2` — 高精度、768 次元
+- `paraphrase-multilingual-MiniLM-L12-v2` — 多言語対応
+
+**ローカル実行が可能:**
+
+Sentence Transformers は、Python の `sentence-transformers` ライブラリを使ってローカル環境で実行できます。API コールが不要なため、コストを抑えつつ、データをローカルに保持したまま埋め込みを生成できます。
+
+```python
+from sentence_transformers import SentenceTransformer
+
+model = SentenceTransformer('all-MiniLM-L6-v2')
+embeddings = model.encode(['犬が走る', '猫が走る'])
+```
+
+#### Embeddings API との関係
+
+OpenAI や Google が提供する Embeddings API は、これらの技術を統合・最適化したものです。
+
+```mermaid
+flowchart LR
+    SA["Self Attention"] --> TF["Transformer"]
+    TF --> BERT["BERT"]
+    BERT --> ST["Sentence Transformers"]
+    TF --> API["Embeddings API<br/>(OpenAI, Google)"]
+    BERT --> API
+    ST -.-> API
+
+    style SA fill:#e8f5e9
+    style TF fill:#e3f2fd
+    style BERT fill:#fff3e0
+    style ST fill:#fce4ec
+    style API fill:#fff9c4
+```
+
+**Embeddings API の内部構造:**
+
+1. **基盤は Transformer** — OpenAI の `text-embedding-3-small` や Google の `gemini-embedding-001` は、Transformer Encoder を基盤としています
+2. **BERT の発展形** — BERT の双方向文脈理解を継承しつつ、さらに大規模なデータと計算資源で学習
+3. **Sentence Transformers の影響** — 文章レベルの埋め込みを生成する設計思想は Sentence Transformers と共通
+
+**API と Sentence Transformers の使い分け:**
+
+| 項目 | Embeddings API（クラウド） | Sentence Transformers（ローカル） |
+| --- | --- | --- |
+| 実装の手軽さ | API コール 1 本で完結 | Python 環境のセットアップが必要 |
+| コスト | 従量課金（トークン数に応じて） | 無料（GPU があれば高速化可能） |
+| データの扱い | クラウドに送信される | ローカルに保持可能（プライバシー重視） |
+| モデルの更新 | プロバイダーが自動で最新化 | 自分でモデルを選択・更新 |
+| カスタマイズ | 不可（プロバイダーのモデルを使用） | Fine-tuning やドメイン特化モデルの利用が可能 |
+
+**実践での選択基準:**
+
+- **Embeddings API が適している場合:**
+  - 開発スピードを重視
+  - インフラ管理を避けたい
+  - 最新の高性能モデルを使いたい
+- **Sentence Transformers が適している場合:**
+  - コストを抑えたい（大量のテキストを処理）
+  - データをローカルに保持したい（医療・金融などのセンシティブなデータ）
+  - ドメイン特化モデルを使いたい（法律、医療など）
+
+:::tip 技術の進化は続く
+Embeddings の技術は日々進化しています。2023 年以降、OpenAI は `text-embedding-3` シリーズで次元数削減（`dimensions` パラメータ）をサポートし、Google は `gemini-embedding-001` で高次元（3072 次元）のベクトルを提供しています。また、Voyage AI（Anthropic が買収）はドメイン特化モデルを展開しており、用途に応じた選択肢が増えています。
+:::
+
+:::
+
 ### RAG（Retrieval-Augmented Generation）の概要
 
 LLM は学習データに含まれない情報（社内ドキュメント、最新ニュース、個人のメモなど）については回答できません。RAG（検索拡張生成）は、この制約を補うための手法です。
@@ -2914,6 +3073,9 @@ const { text } = await generateText({
 
 - OpenAI. [Chat Completions API](https://platform.openai.com/docs/guides/text-generation) - Chat Completions API の公式ガイド（3-1）
 - OpenAI. [Embeddings](https://platform.openai.com/docs/guides/embeddings) - Embeddings API の公式ガイド（3-2）
+- Vaswani et al. (2017). [Attention Is All You Need](https://arxiv.org/abs/1706.03762) - Transformer アーキテクチャを提唱した原論文（3-2 コラム）
+- Devlin et al. (2018). [BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding](https://arxiv.org/abs/1810.04805) - BERT の原論文（3-2 コラム）
+- [Sentence Transformers Documentation](https://sbert.net/) - Sentence Transformers の公式ドキュメント（3-2 コラム）
 - OpenAI. [Structured Outputs](https://platform.openai.com/docs/guides/structured-outputs) - JSON モードおよび Structured Outputs の公式ドキュメント（3-3, 3-4）
 - OpenAI. [Responses API](https://platform.openai.com/docs/api-reference/responses) - Responses API の公式リファレンス（3-5）
 - OpenAI. [Responses vs Chat Completions](https://platform.openai.com/docs/guides/responses-vs-chat-completions) - Responses API と Chat Completions API の比較ガイド（3-5 参考）
