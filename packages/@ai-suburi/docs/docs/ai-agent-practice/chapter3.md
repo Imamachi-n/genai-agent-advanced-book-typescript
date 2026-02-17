@@ -312,7 +312,14 @@ Chapter 2 では、ベクトルデータベースを用いた長期メモリの�
 | 0.9 〜 1.0 | 非常に類似 | 「犬が走る」と「犬が駆ける」 |
 | 0.7 〜 0.9 | やや類似 | 「犬が走る」と「猫が走る」 |
 | 0.3 〜 0.7 | あまり関連なし | 「犬が走る」と「今日は晴れ」 |
-| -1.0 〜 0.3 | ほぼ無関係 | 「犬が走る」と「経済指標の推移」 |
+| 0 付近 | 無関係（直交） | 意味的に接点がない |
+| -1.0 付近 | 意味が正反対 | 「好き」と「嫌い」 |
+
+:::tip 0 と -1 の違い
+理論上、コサイン類似度の **0** と **-1** は異なる意味を持ちます。0 はベクトルが直交している状態で「意味的に無関係」であることを示し、-1 はベクトルが真逆を向いている状態で「意味が正反対」であることを示します。
+
+ただし、OpenAI の Embeddings API をはじめとする多くの埋め込みモデルでは、出力ベクトルの各要素が非負の値になりやすいため、**実際にはコサイン類似度が負の値になることはほとんどありません**。OpenAI のコミュニティフォーラムでの検証では、`text-embedding-3-large` で達成できた最小値は約 -0.003 程度であり、完全な反対（-1）にはなりませんでした。そのため、実用上は 0 付近の値が「最も無関係」な状態として扱われます。
+:::
 
 計算式は以下の通りです。
 
@@ -3408,3 +3415,6 @@ const { text } = await generateText({
 - Devlin et al. (2018). [BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding](https://arxiv.org/abs/1810.04805) - BERT の原論文（コラム）
 - [Sentence Transformers Documentation](https://sbert.net/) - Sentence Transformers の公式ドキュメント（コラム）
 - [Vercel AI SDK](https://ai-sdk.dev/) - 複数の LLM プロバイダーを統一的に扱える TypeScript SDK の公式ドキュメント（コラム）
+- IBM. [What Is Cosine Similarity?](https://www.ibm.com/think/topics/cosine-similarity) - コサイン類似度の定義と -1 / 0 / 1 の意味の解説（3-2 コサイン類似度の補足）
+- Microsoft. [Azure OpenAI embeddings and cosine similarity](https://learn.microsoft.com/en-us/azure/ai-services/openai/concepts/understand-embeddings) - Azure OpenAI の埋め込みとコサイン類似度の解説（3-2 コサイン類似度の補足）
+- OpenAI Developer Community. [Is it possible to achieve embeddings cosine similarity approaching -1?](https://community.openai.com/t/is-it-possible-to-achieve-embeddings-cosine-similarity-approaching-1/705840) - OpenAI 埋め込みで負のコサイン類似度が出にくいことの議論（3-2 コサイン類似度の補足）
