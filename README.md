@@ -14,6 +14,7 @@ TypeScript版 現場で活用するためのAIエージェント実践入門
 │   └── @ai-suburi/
 │       ├── core/                    # サンプルコード (@ai-suburi/core)
 │       │   ├── chapter3/            # 第3章のサンプル
+│       │   ├── chapter4/            # 第4章のサンプル
 │       │   ├── package.json
 │       │   └── tsconfig.json
 │       ├── docs/                    # Docusaurus ドキュメント (@ai-suburi/docs)
@@ -42,12 +43,18 @@ TypeScript版 現場で活用するためのAIエージェント実践入門
 | | [Biome](https://biomejs.dev/) | リンター・フォーマッター |
 | | [secretlint](https://github.com/secretlint/secretlint) | シークレット検出ツール（API キーの誤コミット防止） |
 | | [husky](https://typicode.github.io/husky/) | Git hooks 管理（pre-commit で secretlint を自動実行） |
-| core | [LangChain](https://js.langchain.com/) | LLM アプリケーション開発フレームワーク |
+| core | [OpenAI SDK](https://www.npmjs.com/package/openai) | OpenAI API クライアント |
+| | [Anthropic SDK](https://www.npmjs.com/package/@anthropic-ai/sdk) | Anthropic Claude API クライアント |
+| | [Google Gen AI SDK](https://www.npmjs.com/package/@google/genai) | Google Gemini API クライアント |
+| | [LangChain](https://js.langchain.com/) | LLM アプリケーション開発フレームワーク |
+| | [Tavily](https://tavily.com/) | AI エージェント向け Web 検索 API |
+| | [Zod](https://zod.dev/) | スキーマバリデーションライブラリ |
 | docs | [Docusaurus](https://docusaurus.io/) | ドキュメントサイト |
 | | [Rspack](https://rspack.rs/) | Rust 製の高速バンドラ |
 | | [SWC](https://swc.rs/) | Rust 製の高速トランスパイラ・ミニファイア |
 | | [Lightning CSS](https://lightningcss.dev/) | Rust 製の高速 CSS パーサー・ミニファイア |
 | bedrock-agentcore-cdk | [AWS CDK](https://aws.amazon.com/cdk/) | AWS インフラをコードで定義・デプロイ |
+| | [esbuild](https://esbuild.github.io/) | 高速 JavaScript/TypeScript バンドラ |
 | | [Hono](https://hono.dev/) | 軽量 Web フレームワーク（エージェントアプリで使用） |
 
 ## セットアップ
@@ -181,6 +188,22 @@ pnpm build:docs
 
 ```zsh
 pnpm tsx chapter3/test3-1-chat-completions-api.ts
+```
+
+### CDK（Bedrock AgentCore）
+
+```zsh
+# CDK コマンド実行
+pnpm cdk
+
+# スタック合成
+pnpm cdk:synth
+
+# デプロイ
+pnpm cdk:deploy
+
+# 削除
+pnpm cdk:destroy
 ```
 
 ### 特定パッケージでのコマンド実行
