@@ -11,6 +11,7 @@ sidebar_position: 2
 :::note この章で学ぶこと
 
 - Express で AgentCore Runtime 用のエージェントアプリを実装する方法
+- Docker コンテナ（ARM64）でエージェントをパッケージングする方法
 - AWS CDK で Runtime + Endpoint をデプロイする方法
 - `@aws-cdk/aws-bedrock-agentcore-alpha` の L2 コンストラクトの使い方
 - デプロイから動作確認・クリーンアップまでの一連のワークフロー
@@ -72,6 +73,8 @@ graph TB
 
 ## プロジェクト構成
 
+プロジェクトは **CDK 側**（`bin/`、`lib/`）と**エージェントアプリ側**（`agent/`）の 2 つの領域に分かれています。CDK 側はインフラ定義を、`agent/` はコンテナ内で動作するアプリケーション本体を管理します。
+
 ```
 packages/@ai-suburi/bedrock-agentcore-cdk/
 ├── bin/
@@ -104,6 +107,10 @@ AgentCore Runtime は HTTP サーバーとして動作するコンテナを要�
 
 :::tip なぜ ARM64 なのか？
 AgentCore Runtime は Graviton ベースのインフラで動作するため、コンテナは ARM64 アーキテクチャでビルドする必要があります。Dockerfile の `FROM` で `--platform=linux/arm64` を必ず指定してください。
+:::
+
+:::info agent/ ディレクトリの TypeScript 設定
+`agent/` は CDK プロジェクトとは独立した TypeScript 設定（`module: "commonjs"`）を使用しています。CDK 側は ESM（`"type": "module"`）ですが、Docker コンテナ内では `tsc` でビルドした CommonJS の JavaScript を `node` で直接実行するため、シンプルな CommonJS 構成が適しています。
 :::
 
 ### agent/index.ts
@@ -192,11 +199,11 @@ app.listen(PORT, '0.0.0.0', () => {
 });
 ```
 
-ポイントを解説します。
+実装のポイントは以下の通りです。
 
-- **Converse API** を使用しています。`InvokeModel` よりも統一的なインターフェースで、モデルの切り替えが容易です
-- **環境変数 `MODEL_ID`** で使用するモデルを外部から指定できます。CDK スタック側でこの値を設定します
-- エラーハンドリングでは、クライアントに対して適切な HTTP ステータスコードとエラーメッセージを返します
+- **Converse API** を使用しています。`InvokeModel` はモデルごとにリクエスト/レスポンスの形式が異なりますが、Converse API は統一的なインターフェースを提供するため、モデルの切り替えが容易です
+- **環境変数 `MODEL_ID`** で使用するモデルを外部から指定できます。CDK スタック側の `environmentVariables` でこの値を設定します
+- エラーハンドリングでは、クライアントに対して適切な HTTP ステータスコード（400 / 500）とエラーメッセージを返します
 
 ### Dockerfile
 
@@ -218,13 +225,50 @@ EXPOSE 8080
 CMD ["node", "dist/index.js"]
 ```
 
+Dockerfile のポイントは以下の通りです。
+
+- `--platform=linux/arm64` で ARM64 イメージを指定しています。AgentCore Runtime は Graviton ベースで動作するため、必須の設定です
+- **依存関係のインストールとソースコードのコピーを分離**しています。`package*.json` を先にコピーして `npm install` を実行することで、ソースコードを変更しても依存関係のレイヤーキャッシュが再利用されます。これにより再ビルドが高速になります
+- `npm install --production` で本番依存のみをインストールし、イメージサイズを削減しています
+
 ---
 
-## CDK スタックの実装
+## CDK アプリの実装
 
-CDK スタックでは `@aws-cdk/aws-bedrock-agentcore-alpha` パッケージの L2 コンストラクトを使って、Runtime と Endpoint を作成します。
+ここからは CDK 側のコードを実装していきます。CDK アプリのエントリポイントとスタック定義の 2 ファイルで構成されます。
+
+### bin/app.ts
+
+CDK アプリのエントリポイントです。ここでスタックをインスタンス化し、デプロイ先のアカウント・リージョンを設定します。
+
+```typescript title="bin/app.ts"
+#!/usr/bin/env npx tsx
+import 'source-map-support/register.js';
+import * as cdk from 'aws-cdk-lib';
+import { AgentCoreRuntimeStack } from '../lib/agentcore-runtime-stack.js';
+
+const app = new cdk.App();
+
+new AgentCoreRuntimeStack(app, 'AgentCoreRuntimeStack', {
+  // CDK_DEFAULT_ACCOUNT / CDK_DEFAULT_REGION が設定されていればそれを使用
+  // 未設定の場合は CDK が AWS CLI のプロファイルから自動検出する
+  ...(process.env.CDK_DEFAULT_ACCOUNT && process.env.CDK_DEFAULT_REGION
+    ? {
+        env: {
+          account: process.env.CDK_DEFAULT_ACCOUNT,
+          region: process.env.CDK_DEFAULT_REGION,
+        },
+      }
+    : {}),
+});
+```
+
+- `source-map-support/register.js` を読み込むことで、エラー発生時のスタックトレースが TypeScript のソース位置を指すようになります
+- `CDK_DEFAULT_ACCOUNT` と `CDK_DEFAULT_REGION` は `cdk deploy` 実行時に CDK CLI が自動的に設定する環境変数です。明示的に `env` を指定することで、`cdk diff` や `cdk synth` でもアカウント・リージョン依存のリソース（ARN など）が正しく解決されます
 
 ### lib/agentcore-runtime-stack.ts
+
+CDK スタックでは `@aws-cdk/aws-bedrock-agentcore-alpha` パッケージの L2 コンストラクトを使って、Runtime と Endpoint を作成します。
 
 ```typescript title="lib/agentcore-runtime-stack.ts"
 import * as cdk from 'aws-cdk-lib';
@@ -265,7 +309,11 @@ export class AgentCoreRuntimeStack extends cdk.Stack {
 }
 ```
 
-4 つのステップで構成されています。それぞれ見ていきましょう。
+:::info ESM 環境での __dirname
+CDK プロジェクトは `"type": "module"`（ESM）で構成しているため、CommonJS の `__dirname` が使えません。`import.meta.url` と `fileURLToPath` を組み合わせて同等の値を取得しています。このパターンは ESM ベースの CDK プロジェクトでは定番です。
+:::
+
+スタックは 4 つのステップで構成されています。各ステップの詳細を見ていきます。
 
 ### 1. AgentRuntimeArtifact の作成
 
@@ -349,8 +397,8 @@ CDK を初めて使用するリージョン・アカウントでは、Bootstrap 
 pnpm cdk bootstrap
 ```
 
-:::caution Bootstrap は一度だけ
-Bootstrap はアカウント・リージョンごとに一度だけ実行すれば OK です。すでに実行済みの場合はスキップできます。
+:::info Bootstrap で作成されるリソース
+Bootstrap は、CDK がデプロイに必要とする S3 バケット（テンプレート・アセット格納用）、ECR リポジトリ（Docker イメージ格納用）、IAM ロールなどを含む `CDKToolkit` スタックを作成します。アカウント・リージョンごとに一度だけ実行すれば OK です。
 :::
 
 ### 3. CloudFormation テンプレートの確認（任意）
@@ -367,13 +415,25 @@ pnpm cdk:synth
 pnpm cdk:deploy
 ```
 
-Docker イメージのビルド → ECR へのプッシュ → CloudFormation スタックの作成が自動で行われます。
+`cdk deploy` を実行すると、以下の処理が自動で行われます。
+
+```mermaid
+flowchart LR
+    A["cdk deploy<br/>実行"] --> B["Docker イメージ<br/>ビルド（ARM64）"]
+    B --> C["ECR へ<br/>プッシュ"]
+    C --> D["CloudFormation<br/>スタック作成"]
+    D --> E["Runtime +<br/>Endpoint 作成"]
+```
+
+:::tip 初回デプロイの所要時間
+初回は Docker イメージのビルドと ECR へのプッシュがあるため、数分〜十数分かかります。2 回目以降は Docker のレイヤーキャッシュが効くため、変更がなければ高速にデプロイできます。
+:::
 
 ---
 
 ## 動作確認
 
-デプロイが完了したら、AWS CLI の `bedrock-agentcore` コマンドでエージェントを呼び出してみましょう。
+デプロイが完了したら、AWS CLI でエージェントを呼び出して動作を確認します。
 
 ```bash
 # Runtime の一覧を確認
@@ -388,13 +448,22 @@ aws bedrock-agentcore invoke-agent-runtime-endpoint \
 cat output.json
 ```
 
-正常にレスポンスが返ってくれば、デプロイ成功です。
+**実行結果の例:**
+
+```json
+{
+  "response": "Amazon Bedrock AgentCore is a fully managed service that provides the infrastructure and tools needed to deploy, manage, and scale AI agents in production environments...",
+  "status": "success"
+}
+```
+
+上記のように `status: "success"` とレスポンスが返ってくれば、デプロイ成功です。
 
 ---
 
 ## クリーンアップ
 
-使い終わったらリソースを削除して、不要な課金を防ぎましょう。
+動作確認が済んだら、リソースを削除して不要な課金を防ぎます。
 
 ```bash
 pnpm cdk:destroy
@@ -411,4 +480,5 @@ pnpm cdk:destroy
 - [Amazon Bedrock AgentCore 公式ドキュメント](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/)
 - [AgentCore Runtime HTTP Protocol Contract](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-http-protocol-contract.html)
 - [@aws-cdk/aws-bedrock-agentcore-alpha API リファレンス](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-bedrock-agentcore-alpha-readme.html)
+- [Bedrock Converse API ガイド](https://docs.aws.amazon.com/bedrock/latest/userguide/conversation-inference-call.html)
 - [AgentCore サンプルコード（GitHub）](https://github.com/awslabs/amazon-bedrock-agentcore-samples)
