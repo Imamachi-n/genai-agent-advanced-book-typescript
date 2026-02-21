@@ -35,18 +35,20 @@ TypeScript版 現場で活用するためのAIエージェント実践入門
 
 本プロジェクトでは以下のツールを使用しています。
 
-| ツール | 説明 |
-| --- | --- |
-| [pnpm](https://pnpm.io/) | パッケージマネージャー（モノレポ対応） |
-| [tsx](https://www.npmjs.com/package/tsx) | TypeScript ファイルの直接実行 |
-| [Biome](https://biomejs.dev/) | リンター・フォーマッター |
-| [secretlint](https://github.com/secretlint/secretlint) | シークレット検出ツール（API キーの誤コミット防止） |
-| [husky](https://typicode.github.io/husky/) | Git hooks 管理（pre-commit で secretlint を自動実行） |
-| [LangChain](https://js.langchain.com/) | LLM アプリケーション開発フレームワーク |
-| [Docusaurus](https://docusaurus.io/) | ドキュメントサイト |
-| [Rspack](https://rspack.rs/) | Rust 製の高速バンドラ（Docusaurus のビルドで使用） |
-| [SWC](https://swc.rs/) | Rust 製の高速トランスパイラ・ミニファイア（Docusaurus のビルドで使用） |
-| [Lightning CSS](https://lightningcss.dev/) | Rust 製の高速 CSS パーサー・ミニファイア（Docusaurus のビルドで使用） |
+| カテゴリ | ツール | 説明 |
+| --- | --- | --- |
+| 共通 | [pnpm](https://pnpm.io/) | パッケージマネージャー（モノレポ対応） |
+| | [tsx](https://www.npmjs.com/package/tsx) | TypeScript ファイルの直接実行 |
+| | [Biome](https://biomejs.dev/) | リンター・フォーマッター |
+| | [secretlint](https://github.com/secretlint/secretlint) | シークレット検出ツール（API キーの誤コミット防止） |
+| | [husky](https://typicode.github.io/husky/) | Git hooks 管理（pre-commit で secretlint を自動実行） |
+| core | [LangChain](https://js.langchain.com/) | LLM アプリケーション開発フレームワーク |
+| docs | [Docusaurus](https://docusaurus.io/) | ドキュメントサイト |
+| | [Rspack](https://rspack.rs/) | Rust 製の高速バンドラ |
+| | [SWC](https://swc.rs/) | Rust 製の高速トランスパイラ・ミニファイア |
+| | [Lightning CSS](https://lightningcss.dev/) | Rust 製の高速 CSS パーサー・ミニファイア |
+| bedrock-agentcore-cdk | [AWS CDK](https://aws.amazon.com/cdk/) | AWS インフラをコードで定義・デプロイ |
+| | [Hono](https://hono.dev/) | 軽量 Web フレームワーク（エージェントアプリで使用） |
 
 ## セットアップ
 
