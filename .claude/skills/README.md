@@ -10,6 +10,7 @@
 | [review-doc](#review-doc) | `/review-doc chapter3` | ドキュメントの正確性・整合性チェック＆修正 |
 | [brushup-doc](#brushup-doc) | `/brushup-doc chapter3` | ドキュメントの文章品質向上＆内容充実化 |
 | [cleanup-code](#cleanup-code) | `/cleanup-code packages/@ai-suburi/core/chapter3/test3-12.ts` | TypeScriptコードの型エラー修正・非推奨API置換・未使用import削除・JSDoc追加 |
+| [commit](#commit) | `/commit` | 変更を分析して日本語 Conventional Commits 形式でコミット |
 
 ## 推奨ワークフロー
 
@@ -132,3 +133,23 @@ TypeScript コードの型エラー修正・未使用 import 削除・JSDoc 追�
 ### 整理結果の出力
 
 型エラー修正・未使用 import 削除・JSDoc 追加の結果をカテゴリ別にサマリーとして出力する。
+
+---
+
+## commit
+
+ステージ済みの変更を分析し、日本語の Conventional Commits 形式でコミットするスキル。
+
+- **引数**（任意）: コミットメッセージの補足説明
+- **使用ツール**: Bash, Read, Glob, Grep
+
+### コミットの流れ
+
+1. `git status` / `git diff --cached` で変更内容を把握
+2. 変更の種類に応じた type（feat / fix / docs / refactor / chore 等）を判定
+3. 日本語でコミットメッセージを作成
+4. HEREDOC 形式でコミットを実行
+
+### コミットメッセージの形式
+
+1行目に type + 日本語の要約、本文に変更点の箇条書き、末尾に Co-Authored-By を付与する。
