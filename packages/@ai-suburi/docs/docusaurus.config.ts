@@ -124,6 +124,10 @@ const config: Config = {
               label: 'Chapter 5: データ分析AIエージェントの実装',
               to: '/docs/ai-agent-practice/chapter5',
             },
+            {
+              label: 'Chapter 6: arXiv論文リサーチAIエージェントの実装',
+              to: '/docs/ai-agent-practice/chapter6',
+            },
           ],
         },
         {
