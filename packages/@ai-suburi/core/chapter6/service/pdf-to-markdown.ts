@@ -11,8 +11,7 @@ class JinaApiClient {
   }
 
   async convertPdfToMarkdown(pdfUrl: string): Promise<string> {
-    const encodedUrl = encodeURIComponent(pdfUrl);
-    const jinaUrl = `${this.baseUrl}/${encodedUrl}`;
+    const jinaUrl = `${this.baseUrl}/${pdfUrl}`;
 
     const response = await fetch(jinaUrl, { headers: this.headers });
     if (!response.ok) {

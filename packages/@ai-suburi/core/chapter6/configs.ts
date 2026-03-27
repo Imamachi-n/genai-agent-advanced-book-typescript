@@ -1,16 +1,14 @@
-import { ChatAnthropic } from '@langchain/anthropic';
 import { ChatOpenAI } from '@langchain/openai';
 
 export interface Settings {
   openaiApiKey: string;
-  anthropicApiKey: string;
   cohereApiKey: string;
   jinaApiKey: string;
   debug: boolean;
   // モデル設定
   openaiSmartModel: string;
   openaiFastModel: string;
-  anthropicModel: string;
+  openaiReporterModel: string;
   cohereRerankModel: string;
   temperature: number;
   // エージェント設定
@@ -26,15 +24,11 @@ export interface Settings {
 
 export function loadSettings(): Settings {
   const openaiApiKey = process.env.OPENAI_API_KEY;
-  const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
   const cohereApiKey = process.env.COHERE_API_KEY;
   const jinaApiKey = process.env.JINA_API_KEY;
 
   if (!openaiApiKey) {
     throw new Error('OPENAI_API_KEY environment variable is required');
-  }
-  if (!anthropicApiKey) {
-    throw new Error('ANTHROPIC_API_KEY environment variable is required');
   }
   if (!cohereApiKey) {
     throw new Error('COHERE_API_KEY environment variable is required');
@@ -45,15 +39,13 @@ export function loadSettings(): Settings {
 
   return {
     openaiApiKey,
-    anthropicApiKey,
     cohereApiKey,
     jinaApiKey,
     debug: process.env.DEBUG === 'true',
     // モデル設定
     openaiSmartModel: process.env.OPENAI_SMART_MODEL ?? 'gpt-4o',
     openaiFastModel: process.env.OPENAI_FAST_MODEL ?? 'gpt-4o-mini',
-    anthropicModel:
-      process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-20250514',
+    openaiReporterModel: process.env.OPENAI_REPORTER_MODEL ?? 'gpt-4o',
     cohereRerankModel:
       process.env.COHERE_RERANK_MODEL ?? 'rerank-multilingual-v3.0',
     temperature: Number(process.env.TEMPERATURE ?? '0'),
@@ -85,9 +77,9 @@ export function createFastLlm(settings: Settings): ChatOpenAI {
   });
 }
 
-export function createReporterLlm(settings: Settings): ChatAnthropic {
-  return new ChatAnthropic({
-    model: settings.anthropicModel,
+export function createReporterLlm(settings: Settings): ChatOpenAI {
+  return new ChatOpenAI({
+    model: settings.openaiReporterModel,
     temperature: settings.temperature,
     maxTokens: 8192,
   });

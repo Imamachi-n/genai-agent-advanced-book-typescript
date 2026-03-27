@@ -1,5 +1,8 @@
 import { Annotation, StateGraph } from '@langchain/langgraph';
-import type { CompiledStateGraph } from '@langchain/langgraph';
+import type {
+  CompiledStateGraph,
+  LangGraphRunnableConfig,
+} from '@langchain/langgraph';
 import type { ChatOpenAI } from '@langchain/openai';
 
 import { PaperProcessor } from '../chains/paper-processor-chain.js';
@@ -64,9 +67,9 @@ export class PaperSearchAgent {
         logger.info('|--> search_papers');
         return paperProcessor.invoke(state);
       }, { ends: ['analyze_paper'] })
-      .addNode('analyze_paper', (state) => {
+      .addNode('analyze_paper', (state, config) => {
         logger.info('|--> analyze_paper');
-        return this.analyzePaper(state);
+        return this.analyzePaper(state, config);
       })
       .addNode('organize_results', (state: PaperSearchAgentState) => {
         logger.info('|--> organize_results');
@@ -80,8 +83,10 @@ export class PaperSearchAgent {
 
   private async analyzePaper(
     state: Record<string, unknown>,
+    config: LangGraphRunnableConfig,
   ): Promise<Record<string, unknown>> {
     const output = await this.paperAnalyzer.graph.invoke(state, {
+      ...config,
       recursionLimit: this.recursionLimit,
     });
     const readingResult = output.readingResult as ReadingResult | undefined;

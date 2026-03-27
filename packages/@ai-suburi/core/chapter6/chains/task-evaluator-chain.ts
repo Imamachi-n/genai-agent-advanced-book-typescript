@@ -7,16 +7,21 @@ import {
   type TaskEvaluation,
   taskEvaluationSchema,
 } from '../models.js';
+import { setupLogger } from '../custom-logger.js';
 import { dictToXmlStr } from './utils.js';
 import { loadPrompt } from './utils.js';
+
+const logger = setupLogger('task-evaluator');
 
 export class TaskEvaluator {
   private llm: ChatOpenAI;
   private currentDate: string;
+  private maxRetryCount: number;
 
-  constructor(llm: ChatOpenAI) {
+  constructor(llm: ChatOpenAI, maxRetryCount: number = 3) {
     this.llm = llm;
     this.currentDate = new Date().toISOString().split('T')[0]!;
+    this.maxRetryCount = maxRetryCount;
   }
 
   async invoke(state: Record<string, unknown>): Promise<Command> {
@@ -31,15 +36,49 @@ export class TaskEvaluator {
       })
       .join('\n');
 
+    logger.info(
+      `retryCount=${currentRetryCount}/${this.maxRetryCount}, readingResults=${readingResults.length}件`,
+    );
+
+    // 読み取り結果が0件の場合はリトライせず即レポート生成へ
+    if (readingResults.length === 0) {
+      logger.info(
+        '読み取り結果が0件のため、現状の情報でレポート生成に進みます',
+      );
+      return new Command({
+        goto: 'generate_report',
+        update: {
+          retryCount: currentRetryCount,
+          evaluation: {
+            need_more_information: false,
+            reason: '読み取り結果が0件のため、取得済みの情報でレポートを生成します',
+            content: '',
+          },
+        },
+      });
+    }
+
     const evaluation = await this.run(context, goal);
+    logger.info(
+      `evaluation: need_more_information=${evaluation.need_more_information}, reason=${evaluation.reason}`,
+    );
 
     if (evaluation.need_more_information) {
       currentRetryCount++;
     }
 
-    const nextNode = evaluation.need_more_information
-      ? 'decompose_query'
-      : 'generate_report';
+    // リトライ上限に達した場合は強制的にレポート生成に進む
+    let nextNode: string;
+    if (currentRetryCount >= this.maxRetryCount) {
+      logger.info(
+        `リトライ上限（${this.maxRetryCount}回）に達したため、レポート生成に進みます`,
+      );
+      nextNode = 'generate_report';
+    } else {
+      nextNode = evaluation.need_more_information
+        ? 'decompose_query'
+        : 'generate_report';
+    }
 
     return new Command({
       goto: nextNode,

@@ -1,16 +1,16 @@
 import { StringOutputParser } from '@langchain/core/output_parsers';
 import { ChatPromptTemplate } from '@langchain/core/prompts';
-import type { ChatAnthropic } from '@langchain/anthropic';
+import type { ChatOpenAI } from '@langchain/openai';
 import { Command } from '@langchain/langgraph';
 
 import type { ReadingResult } from '../models.js';
 import { dictToXmlStr, loadPrompt } from './utils.js';
 
 export class Reporter {
-  private llm: ChatAnthropic;
+  private llm: ChatOpenAI;
   private currentDate: string;
 
-  constructor(llm: ChatAnthropic) {
+  constructor(llm: ChatOpenAI) {
     this.llm = llm;
     this.currentDate = new Date().toISOString().split('T')[0]!;
   }

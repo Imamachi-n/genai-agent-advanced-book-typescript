@@ -1,0 +1,7 @@
+{
+  "node_version": "20",
+  "dependencies": ["../.."],
+  "graphs": {
+    "research_agent": "./agent/research-agent.ts:graph"
+  }
+}

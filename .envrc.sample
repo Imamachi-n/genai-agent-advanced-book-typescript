@@ -7,3 +7,6 @@ export TAVILY_API_KEY="your-key"
 export E2B_API_KEY="your-key"
 export COHERE_API_KEY="your-key"
 export JINA_API_KEY="your-key"
+
+# LangGraph Studio（オプション）
+# export LANGSMITH_API_KEY="lsv2_..."

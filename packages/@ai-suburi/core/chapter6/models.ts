@@ -96,13 +96,11 @@ export const arxivTimeRangeSchema = z.object({
   start: z
     .string()
     .nullable()
-    .optional()
-    .describe('The start date of the time range (YYYY-MM-DD).'),
+    .describe('The start date of the time range (YYYY-MM-DD). null if not specified.'),
   end: z
     .string()
     .nullable()
-    .optional()
-    .describe('The end date of the time range (YYYY-MM-DD).'),
+    .describe('The end date of the time range (YYYY-MM-DD). null if not specified.'),
 });
 export type ArxivTimeRange = z.infer<typeof arxivTimeRangeSchema>;
 

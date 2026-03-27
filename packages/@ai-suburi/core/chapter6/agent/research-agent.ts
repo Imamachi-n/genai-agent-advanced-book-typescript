@@ -7,8 +7,10 @@ import {
   StateGraph,
   interrupt,
 } from '@langchain/langgraph';
-import type { CompiledStateGraph } from '@langchain/langgraph';
-import type { ChatAnthropic } from '@langchain/anthropic';
+import type {
+  CompiledStateGraph,
+  LangGraphRunnableConfig,
+} from '@langchain/langgraph';
 import type { ChatOpenAI } from '@langchain/openai';
 import * as readline from 'node:readline';
 
@@ -81,7 +83,7 @@ export class ResearchAgent {
   constructor(
     llm?: ChatOpenAI,
     fastLlm?: ChatOpenAI,
-    reporterLlm?: ChatAnthropic,
+    reporterLlm?: ChatOpenAI,
     settings?: Settings,
   ) {
     const s = settings ?? loadSettings();
@@ -109,7 +111,7 @@ export class ResearchAgent {
       recursionLimit: s.maxRecursionLimit,
       maxWorkers: s.maxWorkers,
     });
-    const evaluateTask = new TaskEvaluator(_llm);
+    const evaluateTask = new TaskEvaluator(_llm, s.maxEvaluationRetryCount);
     const generateReport = new Reporter(_reporterLlm);
 
     this.graph = this.createGraph(
@@ -147,9 +149,9 @@ export class ResearchAgent {
         logger.info('|--> decompose_query');
         return decomposeQuery.invoke(state);
       }, { ends: ['paper_search_agent'] })
-      .addNode('paper_search_agent', (state) => {
+      .addNode('paper_search_agent', (state, config) => {
         logger.info('|--> paper_search_agent');
-        return this.invokePaperSearchAgent(state);
+        return this.invokePaperSearchAgent(state, config);
       }, { ends: ['evaluate_task'] })
       .addNode('evaluate_task', (state) => {
         logger.info('|--> evaluate_task');
@@ -189,8 +191,10 @@ export class ResearchAgent {
 
   private async invokePaperSearchAgent(
     state: Record<string, unknown>,
+    config: LangGraphRunnableConfig,
   ): Promise<Command> {
     const output = await this.paperSearchAgent.graph.invoke(state, {
+      ...config,
       recursionLimit: this.recursionLimit,
     });
     return new Command({
@@ -208,12 +212,25 @@ export async function invokeWorkflow(
   workflow: CompiledStateGraph<any, any, any, any>,
   inputData: Record<string, unknown> | Command,
   config: Record<string, unknown>,
+  options: { skipFeedback?: boolean } = {},
 ): Promise<Record<string, unknown>> {
   const result = await workflow.invoke(inputData, config);
 
-  // human_feedback ノードで中断された場合、ユーザー入力を受け付ける
+  // human_feedback ノードで中断された場合の処理
   const hearing = result.hearing as { is_need_human_feedback?: boolean } | undefined;
   if (hearing?.is_need_human_feedback) {
+    // スキップモード: 自動的にデフォルト応答で続行
+    if (options.skipFeedback) {
+      logger.info('human_feedback をスキップ（自動続行）');
+      return invokeWorkflow(
+        workflow,
+        new Command({ resume: '' }),
+        config,
+        options,
+      );
+    }
+
+    // 対話モード: ユーザー入力を受け付ける
     const rl = readline.createInterface({
       input: process.stdin,
       output: process.stdout,
@@ -228,17 +245,23 @@ export async function invokeWorkflow(
       workflow,
       new Command({ resume: userInput }),
       config,
+      options,
     );
   }
   return result;
 }
 
+// --- LangGraph Studio 用のグラフエクスポート ---
+
+export const graph = new ResearchAgent().graph;
+
 // --- エントリーポイント ---
 
 async function main(): Promise<void> {
-  const userQuery =
-    process.argv[2] ?? 'LLMエージェントの評価方法について調べる';
-  const recursionLimit = Number(process.argv[3] ?? '1000');
+  const skipFeedback = process.argv.includes('--skip-feedback');
+  const args = process.argv.filter((a) => !a.startsWith('--'));
+  const userQuery = args[2] ?? 'LLMエージェントの評価方法について調べる';
+  const recursionLimit = Number(args[3] ?? '1000');
 
   const agent = new ResearchAgent();
   const result = await invokeWorkflow(
@@ -250,6 +273,7 @@ async function main(): Promise<void> {
       configurable: { thread_id: 'arxiv-research-001' },
       recursionLimit,
     },
+    { skipFeedback },
   );
 
   console.log(result.finalOutput);
