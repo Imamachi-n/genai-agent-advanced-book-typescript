@@ -12,7 +12,7 @@ bioRxiv の bioinformatics 分野の論文を RAG（Retrieval-Augmented Generati
 │          (日付+カテゴリ)    (タイトル+Abstract+メタデータ)  │
 │                                                     │
 │  Step B: JSONL 読み込み ──→ OpenAI Embeddings          │
-│                           ──→ Chroma 格納             │
+│                           ──→ Qdrant 格納             │
 └─────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────┐
@@ -22,7 +22,7 @@ bioRxiv の bioinformatics 分野の論文を RAG（Retrieval-Augmented Generati
 │   ├─ ヒアリング → ゴール最適化 → クエリ分解              │
 │   │                                                 │
 │   ├─ PaperSearchAgent（検索＆並列分析）                │
-│   │   ├─ Chroma RAG 検索                            │
+│   │   ├─ Qdrant RAG 検索                            │
 │   │   ├─ OpenAI Embeddings + コサイン類似度リランキング  │
 │   │   ├─ pdf-parse でローカル PDF→テキスト変換          │
 │   │   └─ PaperAnalyzerAgent × N（並列論文分析）        │
@@ -39,7 +39,7 @@ bioRxiv の bioinformatics 分野の論文を RAG（Retrieval-Augmented Generati
 |------------|------|
 | LLM | OpenAI GPT-4o / GPT-4o-mini |
 | Embedding | OpenAI text-embedding-3-small |
-| ベクトルDB | Chroma（ローカル） |
+| ベクトルDB | Qdrant（docker-compose） |
 | リランキング | OpenAI Embeddings + コサイン類似度 |
 | PDF変換 | pdf-parse（ローカル） |
 | フレームワーク | LangGraph |
@@ -52,10 +52,11 @@ bioRxiv の bioinformatics 分野の論文を RAG（Retrieval-Augmented Generati
 export OPENAI_API_KEY="sk-..."
 ```
 
-### 2. Chroma サーバー起動
+### 2. Qdrant サーバー起動
 
 ```bash
-docker run -d -p 8000:8000 chromadb/chroma
+cd chapter6-biorxiv
+docker compose up -d
 ```
 
 ### 3. 依存パッケージ（プロジェクトルートで実行）
@@ -85,16 +86,16 @@ JSONL ファイルは `storage/biorxiv-tmp/` に保存される（1行1論文の
 
 429（レート制限）や 5xx エラー時はエクスポネンシャルバックオフで自動リトライする。プロセス自体が中断された場合は `--resume` でプログレスファイルから再開可能。
 
-### Step 2: Chroma にデータ投入
+### Step 2: Qdrant にデータ投入
 
-Step 1 で保存した JSONL ファイルを行単位でストリーム読み込みし、Chroma ベクトルDB に投入する。大量データでもメモリを圧迫しない。
+Step 1 で保存した JSONL ファイルを行単位でストリーム読み込みし、Qdrant ベクトルDB に投入する。大量データでもメモリを圧迫しない。
 
 ```bash
 # JSONL ファイルを指定して投入
-npx tsx chapter6-biorxiv/rag/chroma-loader.ts --input storage/biorxiv-tmp/biorxiv_2025-03-01_2025-03-07_*.jsonl
+npx tsx chapter6-biorxiv/rag/qdrant-loader.ts --input storage/biorxiv-tmp/biorxiv_2025-03-01_2025-03-07_*.jsonl
 
 # バッチサイズを指定（デフォルト: 50）
-npx tsx chapter6-biorxiv/rag/chroma-loader.ts --input storage/biorxiv-tmp/biorxiv_2025-03-01_2025-03-07_*.jsonl --batch-size 30
+npx tsx chapter6-biorxiv/rag/qdrant-loader.ts --input storage/biorxiv-tmp/biorxiv_2025-03-01_2025-03-07_*.jsonl --batch-size 30
 ```
 
 重複チェック付きなので、同じ JSONL を再投入しても二重登録されない。
@@ -120,6 +121,7 @@ npx @langchain/langgraph-cli dev
 
 ```
 chapter6-biorxiv/
+├── docker-compose.yml           # Qdrant サーバー
 ├── models.ts                    # BiorxivPaper 等の型定義（Zod）
 ├── configs.ts                   # 設定 & LLM ファクトリ
 ├── custom-logger.ts             # ロガー
@@ -140,8 +142,8 @@ chapter6-biorxiv/
 │   └── prompts/                 # プロンプトテンプレート（10ファイル）
 ├── rag/
 │   ├── biorxiv-fetcher.ts       # Step A: bioRxiv API → JSONL 保存（逐次追記）
-│   ├── chroma-loader.ts         # Step B: JSONL → Chroma 投入（ストリーム読み込み）
-│   ├── chroma-store.ts          # Chroma クライアント
+│   ├── qdrant-loader.ts         # Step B: JSONL → Qdrant 投入（ストリーム読み込み）
+│   ├── qdrant-store.ts          # Qdrant クライアント
 │   └── rag-searcher.ts          # RAG 検索 + リランキング
 ├── searcher/
 │   └── searcher.ts              # Searcher インターフェース
@@ -158,13 +160,13 @@ chapter6-biorxiv/
 
 | 項目 | chapter6（arXiv） | chapter6-biorxiv |
 |------|------------------|------------------|
-| 論文ソース | arXiv API（キーワード検索） | bioRxiv API → Chroma RAG |
+| 論文ソース | arXiv API（キーワード検索） | bioRxiv API → Qdrant RAG |
 | 検索方式 | arXiv API の全文検索 | ベクトル類似度検索（RAG） |
 | リランキング | Cohere rerank API | OpenAI Embeddings + コサイン類似度 |
 | PDF 変換 | Jina Reader API | pdf-parse（ローカル） |
 | LLM | OpenAI + Claude Sonnet 4 | OpenAI のみ |
 | 必要な API キー | OpenAI, Cohere, Jina | OpenAI のみ |
-| 事前データ取り込み | 不要 | 必要（Chroma へ格納） |
+| 事前データ取り込み | 不要 | 必要（Qdrant へ格納） |
 
 ## 環境変数一覧
 
@@ -175,8 +177,8 @@ chapter6-biorxiv/
 | `OPENAI_FAST_MODEL` | - | `gpt-4o-mini` | 高速処理用モデル |
 | `OPENAI_REPORTER_MODEL` | - | `gpt-4o` | レポート生成用モデル |
 | `EMBEDDING_MODEL` | - | `text-embedding-3-small` | エンベディングモデル |
-| `CHROMA_COLLECTION_NAME` | - | `biorxiv-bioinformatics` | Chroma コレクション名 |
-| `CHROMA_PERSIST_DIRECTORY` | - | `storage/chroma` | Chroma 永続化ディレクトリ |
+| `QDRANT_URL` | - | `http://localhost:6333` | Qdrant サーバー URL |
+| `QDRANT_COLLECTION_NAME` | - | `biorxiv-bioinformatics` | Qdrant コレクション名 |
 | `BIORXIV_CATEGORY` | - | `bioinformatics` | bioRxiv カテゴリフィルタ |
 | `MAX_SEARCH_RESULTS` | - | `20` | RAG 検索の取得件数 |
 | `MAX_PAPERS` | - | `3` | 深掘り分析する論文数 |

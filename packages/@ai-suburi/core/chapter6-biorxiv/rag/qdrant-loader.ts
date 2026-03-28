@@ -4,25 +4,25 @@ import * as readline from 'node:readline';
 import type { BiorxivPaper } from '../models.js';
 import { loadSettings } from '../configs.js';
 import { setupLogger } from '../custom-logger.js';
-import { ChromaStore } from './chroma-store.js';
+import { QdrantStore } from './qdrant-store.js';
 
-const logger = setupLogger('chroma-loader');
+const logger = setupLogger('qdrant-loader');
 
 /**
- * JSONL ファイルから論文データを行単位で読み込み、Chroma に投入する。
+ * JSONL ファイルから論文データを行単位で読み込み、Qdrant に投入する。
  * biorxiv-fetcher.ts で出力した JSONL を入力として使う。
  *
  * 行単位のストリーム処理のため、大量データでもメモリを圧迫しない。
  */
-export async function loadPapersToChroma(options: {
+export async function loadPapersToQdrant(options: {
   jsonPath: string;
   batchSize?: number;
 }): Promise<{ totalLoaded: number; skipped: number }> {
   const settings = loadSettings();
   const batchSize = options.batchSize ?? 50;
 
-  const store = new ChromaStore({
-    collectionName: settings.chromaCollectionName,
+  const store = new QdrantStore({
+    collectionName: settings.qdrantCollectionName,
     openaiApiKey: settings.openaiApiKey,
     embeddingModel: settings.embeddingModel,
   });
@@ -33,8 +33,13 @@ export async function loadPapersToChroma(options: {
   let batch: BiorxivPaper[] = [];
 
   // JSONL を行単位でストリーム読み込み
-  const fileStream = fs.createReadStream(options.jsonPath, { encoding: 'utf-8' });
-  const rl = readline.createInterface({ input: fileStream, crlfDelay: Infinity });
+  const fileStream = fs.createReadStream(options.jsonPath, {
+    encoding: 'utf-8',
+  });
+  const rl = readline.createInterface({
+    input: fileStream,
+    crlfDelay: Infinity,
+  });
 
   for await (const line of rl) {
     const trimmed = line.trim();
@@ -68,14 +73,14 @@ export async function loadPapersToChroma(options: {
 }
 
 async function processBatch(
-  store: ChromaStore,
+  store: QdrantStore,
   batch: BiorxivPaper[],
   batchNumber: number,
 ): Promise<{ loaded: number; skipped: number }> {
   let loaded = 0;
   let skipped = 0;
 
-  // 重複チェック: 既に Chroma にある論文はスキップ
+  // 重複チェック: 既に Qdrant にある論文はスキップ
   const newPapers: BiorxivPaper[] = [];
   for (const paper of batch) {
     const alreadyExists = await store.exists(paper.doi);
@@ -113,16 +118,15 @@ async function main(): Promise<void> {
       batchSize = Number.parseInt(args[i + 1]!, 10);
       i++;
     } else if (!args[i]!.startsWith('--')) {
-      // 引数なしで JSON パスを指定できるようにする
       jsonPath = args[i]!;
     }
   }
 
   if (!jsonPath) {
     console.error(
-      'Usage: npx tsx rag/chroma-loader.ts --input <path-to-json> [--batch-size 50]',
+      'Usage: npx tsx rag/qdrant-loader.ts --input <path-to-jsonl> [--batch-size 50]',
     );
-    console.error('   or: npx tsx rag/chroma-loader.ts <path-to-json>');
+    console.error('   or: npx tsx rag/qdrant-loader.ts <path-to-jsonl>');
     process.exit(1);
   }
 
@@ -131,7 +135,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const result = await loadPapersToChroma({
+  const result = await loadPapersToQdrant({
     jsonPath,
     ...(batchSize != null ? { batchSize } : {}),
   });

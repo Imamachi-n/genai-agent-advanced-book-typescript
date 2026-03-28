@@ -18,8 +18,8 @@ export interface Settings {
   maxWorkers: number;
   maxRecursionLimit: number;
   // RAG設定
-  chromaCollectionName: string;
-  chromaPersistDirectory: string;
+  qdrantCollectionName: string;
+  qdrantUrl: string;
   biorxivCategory: string;
   ingestionBatchSize: number;
 }
@@ -51,10 +51,10 @@ export function loadSettings(): Settings {
     maxWorkers: Number(process.env.MAX_WORKERS ?? '3'),
     maxRecursionLimit: Number(process.env.MAX_RECURSION_LIMIT ?? '1000'),
     // RAG設定
-    chromaCollectionName:
-      process.env.CHROMA_COLLECTION_NAME ?? 'biorxiv-bioinformatics',
-    chromaPersistDirectory:
-      process.env.CHROMA_PERSIST_DIRECTORY ?? 'storage/chroma',
+    qdrantCollectionName:
+      process.env.QDRANT_COLLECTION_NAME ?? 'biorxiv-bioinformatics',
+    qdrantUrl:
+      process.env.QDRANT_URL ?? 'http://localhost:6333',
     biorxivCategory: process.env.BIORXIV_CATEGORY ?? 'bioinformatics',
     ingestionBatchSize: Number(process.env.INGESTION_BATCH_SIZE ?? '100'),
   };

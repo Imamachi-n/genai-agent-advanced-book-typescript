@@ -6,7 +6,7 @@ import OpenAI from 'openai';
 import { setupLogger } from '../custom-logger.js';
 import type { BiorxivPaper } from '../models.js';
 import type { Searcher } from '../searcher/searcher.js';
-import { ChromaStore } from './chroma-store.js';
+import { QdrantStore } from './qdrant-store.js';
 
 const logger = setupLogger('rag-searcher');
 
@@ -59,7 +59,7 @@ export class RagSearcher implements Searcher {
   static readonly RELEVANCE_SCORE_THRESHOLD = 0.3;
 
   private llm: ChatOpenAI;
-  private store: ChromaStore;
+  private store: QdrantStore;
   private openai: OpenAI;
   private embeddingModel: string;
   private maxSearchResults: number;
@@ -69,7 +69,7 @@ export class RagSearcher implements Searcher {
 
   constructor(
     llm: ChatOpenAI,
-    store: ChromaStore,
+    store: QdrantStore,
     options: {
       openaiApiKey: string;
       embeddingModel?: string;

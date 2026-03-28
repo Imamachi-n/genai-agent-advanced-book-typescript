@@ -28,7 +28,7 @@ import {
 } from '../configs.js';
 import { setupLogger } from '../custom-logger.js';
 import type { Hearing, ReadingResult, TaskEvaluation } from '../models.js';
-import { ChromaStore } from '../rag/chroma-store.js';
+import { QdrantStore } from '../rag/qdrant-store.js';
 import { RagSearcher } from '../rag/rag-searcher.js';
 import { PaperSearchAgent } from './paper-search-agent.js';
 
@@ -102,8 +102,8 @@ export class ResearchAgent {
     });
 
     // RAG Searcher のセットアップ
-    const store = new ChromaStore({
-      collectionName: s.chromaCollectionName,
+    const store = new QdrantStore({
+      collectionName: s.qdrantCollectionName,
       openaiApiKey: s.openaiApiKey,
       embeddingModel: s.embeddingModel,
     });
