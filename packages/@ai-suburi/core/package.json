@@ -20,6 +20,7 @@
     "@langchain/openai": "^1.2.7",
     "@tavily/core": "^0.7.1",
     "better-sqlite3": "^12.6.2",
+    "chromadb": "^3.4.0",
     "cohere-ai": "^7.20.0",
     "duck-duck-scrape": "^2.2.7",
     "fast-xml-parser": "^5.3.7",
