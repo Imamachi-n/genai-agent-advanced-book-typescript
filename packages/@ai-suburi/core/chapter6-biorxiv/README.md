@@ -8,10 +8,10 @@ bioRxiv の bioinformatics 分野の論文を RAG（Retrieval-Augmented Generati
 ┌─────────────────────────────────────────────────────┐
 │              データ取り込みパイプライン（2ステップ）         │
 │                                                     │
-│  Step A: bioRxiv API ──→ JSON ファイル保存（tmp）      │
+│  Step A: bioRxiv API ──→ JSONL ファイル保存（tmp）      │
 │          (日付+カテゴリ)    (タイトル+Abstract+メタデータ)  │
 │                                                     │
-│  Step B: JSON 読み込み ──→ OpenAI Embeddings          │
+│  Step B: JSONL 読み込み ──→ OpenAI Embeddings          │
 │                           ──→ Chroma 格納             │
 └─────────────────────────────────────────────────────┘
 
@@ -68,7 +68,7 @@ pnpm install
 
 ### Step 1: bioRxiv 論文メタデータの取得
 
-bioRxiv API から bioinformatics 分野の論文メタデータを取得し、JSON ファイルとして保存する。
+bioRxiv API から bioinformatics 分野の論文メタデータを取得し、JSONL ファイルとして逐次保存する。ページ取得ごとにファイルに追記するため、大量データでもメモリを圧迫しない。
 
 ```bash
 # 直近1週間分を取得する例
@@ -78,21 +78,21 @@ npx tsx chapter6-biorxiv/rag/biorxiv-fetcher.ts --start 2025-03-01 --end 2025-03
 npx tsx chapter6-biorxiv/rag/biorxiv-fetcher.ts --start 2025-01-01 --end 2025-03-28 --category bioinformatics --output storage/biorxiv-tmp
 ```
 
-JSON ファイルは `storage/biorxiv-tmp/` に保存される。bioRxiv API は 100 件/リクエストでページネーションされる。bioinformatics カテゴリは約 40,000 件以上あるため、まずは短い日付範囲から始めることを推奨。
+JSONL ファイルは `storage/biorxiv-tmp/` に保存される（1行1論文の JSON Lines 形式）。bioRxiv API は 100 件/リクエストでページネーションされる。bioinformatics カテゴリは約 40,000 件以上あるため、まずは短い日付範囲から始めることを推奨。
 
 ### Step 2: Chroma にデータ投入
 
-Step 1 で保存した JSON ファイルを読み込み、Chroma ベクトルDB に投入する。
+Step 1 で保存した JSONL ファイルを行単位でストリーム読み込みし、Chroma ベクトルDB に投入する。大量データでもメモリを圧迫しない。
 
 ```bash
-# JSON ファイルを指定して投入
-npx tsx chapter6-biorxiv/rag/chroma-loader.ts --input storage/biorxiv-tmp/biorxiv_2025-03-01_2025-03-07_*.json
+# JSONL ファイルを指定して投入
+npx tsx chapter6-biorxiv/rag/chroma-loader.ts --input storage/biorxiv-tmp/biorxiv_2025-03-01_2025-03-07_*.jsonl
 
 # バッチサイズを指定（デフォルト: 50）
-npx tsx chapter6-biorxiv/rag/chroma-loader.ts --input storage/biorxiv-tmp/biorxiv_2025-03-01_2025-03-07_*.json --batch-size 30
+npx tsx chapter6-biorxiv/rag/chroma-loader.ts --input storage/biorxiv-tmp/biorxiv_2025-03-01_2025-03-07_*.jsonl --batch-size 30
 ```
 
-重複チェック付きなので、同じ JSON を再投入しても二重登録されない。
+重複チェック付きなので、同じ JSONL を再投入しても二重登録されない。
 
 ### Step 3: リサーチエージェント実行
 
@@ -134,8 +134,8 @@ chapter6-biorxiv/
 │   ├── utils.ts                 # ユーティリティ
 │   └── prompts/                 # プロンプトテンプレート（10ファイル）
 ├── rag/
-│   ├── biorxiv-fetcher.ts       # Step A: bioRxiv API → JSON 保存
-│   ├── chroma-loader.ts         # Step B: JSON → Chroma 投入
+│   ├── biorxiv-fetcher.ts       # Step A: bioRxiv API → JSONL 保存（逐次追記）
+│   ├── chroma-loader.ts         # Step B: JSONL → Chroma 投入（ストリーム読み込み）
 │   ├── chroma-store.ts          # Chroma クライアント
 │   └── rag-searcher.ts          # RAG 検索 + リランキング
 ├── searcher/
@@ -145,7 +145,7 @@ chapter6-biorxiv/
 │   ├── markdown-storage.ts      # ファイル I/O
 │   └── markdown-parser.ts       # セクション抽出
 └── storage/
-    ├── biorxiv-tmp/             # Step 1 で取得した JSON の保存先
+    ├── biorxiv-tmp/             # Step 1 で取得した JSONL の保存先
     └── markdown/                # 変換済みテキスト保存先
 ```
 

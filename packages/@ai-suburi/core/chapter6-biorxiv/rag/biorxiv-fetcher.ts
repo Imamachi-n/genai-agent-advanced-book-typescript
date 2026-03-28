@@ -68,8 +68,11 @@ async function fetchBiorxivPage(
 }
 
 /**
- * bioRxiv API から論文メタデータを取得し、JSON ファイルとして保存する。
+ * bioRxiv API から論文メタデータを取得し、JSONL ファイルとして逐次保存する。
  * Chroma への投入は行わない。
+ *
+ * JSONL 形式: 1行に1つの BiorxivPaper JSON オブジェクト。
+ * ページ取得ごとにファイルに追記するため、大量データでもメモリを圧迫しない。
  */
 export async function fetchBiorxivPapers(options: {
   startDate: string;
@@ -87,8 +90,14 @@ export async function fetchBiorxivPapers(options: {
 
   fs.mkdirSync(outputDir, { recursive: true });
 
-  const allPapers: BiorxivPaper[] = [];
+  // JSONL ファイルを先に作成し、ページごとに追記する
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const fileName = `biorxiv_${options.startDate}_${options.endDate}_${timestamp}.jsonl`;
+  const outputPath = path.join(outputDir, fileName);
+  const writeStream = fs.createWriteStream(outputPath, { flags: 'w', encoding: 'utf-8' });
+
   let cursor = 0;
+  let totalFetched = 0;
 
   while (true) {
     const response = await fetchBiorxivPage(
@@ -105,11 +114,14 @@ export async function fetchBiorxivPapers(options: {
     }
 
     const papers = entries.map(apiEntryToPaper);
-    allPapers.push(...papers);
 
-    logger.info(
-      `Fetched ${entries.length} entries (total so far: ${allPapers.length})`,
-    );
+    // JSONL: 1行1オブジェクトでファイルに追記
+    for (const paper of papers) {
+      writeStream.write(`${JSON.stringify(paper)}\n`);
+    }
+    totalFetched += papers.length;
+
+    logger.info(`Fetched ${entries.length} entries (total so far: ${totalFetched})`);
 
     // ページネーション: 100件ずつ
     if (entries.length < batchSize) {
@@ -123,15 +135,14 @@ export async function fetchBiorxivPapers(options: {
     await new Promise((resolve) => setTimeout(resolve, delayMs));
   }
 
-  // JSON ファイルに保存
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const fileName = `biorxiv_${options.startDate}_${options.endDate}_${timestamp}.json`;
-  const outputPath = path.join(outputDir, fileName);
+  // ストリームを閉じる
+  await new Promise<void>((resolve, reject) => {
+    writeStream.end(() => resolve());
+    writeStream.on('error', reject);
+  });
 
-  fs.writeFileSync(outputPath, JSON.stringify(allPapers, null, 2), 'utf-8');
-  logger.info(`Saved ${allPapers.length} papers to ${outputPath}`);
-
-  return { outputPath, totalFetched: allPapers.length };
+  logger.info(`Saved ${totalFetched} papers to ${outputPath}`);
+  return { outputPath, totalFetched };
 }
 
 // --- CLI エントリーポイント ---

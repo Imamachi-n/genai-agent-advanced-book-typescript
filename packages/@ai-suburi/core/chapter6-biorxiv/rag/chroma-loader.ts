@@ -1,4 +1,5 @@
 import * as fs from 'node:fs';
+import * as readline from 'node:readline';
 
 import type { BiorxivPaper } from '../models.js';
 import { loadSettings } from '../configs.js';
@@ -8,8 +9,10 @@ import { ChromaStore } from './chroma-store.js';
 const logger = setupLogger('chroma-loader');
 
 /**
- * JSON ファイルから論文データを読み込み、Chroma に投入する。
- * biorxiv-fetcher.ts で出力した JSON を入力として使う。
+ * JSONL ファイルから論文データを行単位で読み込み、Chroma に投入する。
+ * biorxiv-fetcher.ts で出力した JSONL を入力として使う。
+ *
+ * 行単位のストリーム処理のため、大量データでもメモリを圧迫しない。
  */
 export async function loadPapersToChroma(options: {
   jsonPath: string;
@@ -24,37 +27,36 @@ export async function loadPapersToChroma(options: {
     embeddingModel: settings.embeddingModel,
   });
 
-  // JSON ファイル読み込み
-  const raw = fs.readFileSync(options.jsonPath, 'utf-8');
-  const papers: BiorxivPaper[] = JSON.parse(raw);
-  logger.info(`Loaded ${papers.length} papers from ${options.jsonPath}`);
-
   let totalLoaded = 0;
   let skipped = 0;
+  let batchNumber = 0;
+  let batch: BiorxivPaper[] = [];
 
-  // バッチに分割して処理（Embedding API のレート制限対策）
-  for (let i = 0; i < papers.length; i += batchSize) {
-    const batch = papers.slice(i, i + batchSize);
+  // JSONL を行単位でストリーム読み込み
+  const fileStream = fs.createReadStream(options.jsonPath, { encoding: 'utf-8' });
+  const rl = readline.createInterface({ input: fileStream, crlfDelay: Infinity });
 
-    // 重複チェック: 既に Chroma にある論文はスキップ
-    const newPapers: BiorxivPaper[] = [];
-    for (const paper of batch) {
-      const alreadyExists = await store.exists(paper.doi);
-      if (alreadyExists) {
-        skipped++;
-      } else {
-        newPapers.push(paper);
-      }
+  for await (const line of rl) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    const paper: BiorxivPaper = JSON.parse(trimmed);
+    batch.push(paper);
+
+    if (batch.length >= batchSize) {
+      const result = await processBatch(store, batch, batchNumber);
+      totalLoaded += result.loaded;
+      skipped += result.skipped;
+      batchNumber++;
+      batch = [];
     }
+  }
 
-    if (newPapers.length > 0) {
-      await store.addDocuments(newPapers);
-      totalLoaded += newPapers.length;
-    }
-
-    logger.info(
-      `Batch ${Math.floor(i / batchSize) + 1}: ${newPapers.length} added, ${batch.length - newPapers.length} skipped (total: ${totalLoaded} loaded, ${skipped} skipped)`,
-    );
+  // 残りのバッチを処理
+  if (batch.length > 0) {
+    const result = await processBatch(store, batch, batchNumber);
+    totalLoaded += result.loaded;
+    skipped += result.skipped;
   }
 
   const totalCount = await store.getDocumentCount();
@@ -63,6 +65,37 @@ export async function loadPapersToChroma(options: {
   );
 
   return { totalLoaded, skipped };
+}
+
+async function processBatch(
+  store: ChromaStore,
+  batch: BiorxivPaper[],
+  batchNumber: number,
+): Promise<{ loaded: number; skipped: number }> {
+  let loaded = 0;
+  let skipped = 0;
+
+  // 重複チェック: 既に Chroma にある論文はスキップ
+  const newPapers: BiorxivPaper[] = [];
+  for (const paper of batch) {
+    const alreadyExists = await store.exists(paper.doi);
+    if (alreadyExists) {
+      skipped++;
+    } else {
+      newPapers.push(paper);
+    }
+  }
+
+  if (newPapers.length > 0) {
+    await store.addDocuments(newPapers);
+    loaded = newPapers.length;
+  }
+
+  logger.info(
+    `Batch ${batchNumber + 1}: ${loaded} added, ${skipped} skipped`,
+  );
+
+  return { loaded, skipped };
 }
 
 // --- CLI エントリーポイント ---
