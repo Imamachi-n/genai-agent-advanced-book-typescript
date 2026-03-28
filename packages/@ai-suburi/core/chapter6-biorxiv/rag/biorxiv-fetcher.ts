@@ -1,9 +1,13 @@
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+
 import type { BiorxivPaper } from '../models.js';
 import { loadSettings } from '../configs.js';
 import { setupLogger } from '../custom-logger.js';
-import { ChromaStore } from './chroma-store.js';
 
-const logger = setupLogger('biorxiv-ingester');
+const logger = setupLogger('biorxiv-fetcher');
+
+const DEFAULT_OUTPUT_DIR = 'storage/biorxiv-tmp';
 
 interface BiorxivApiResponse {
   messages: { status: string; count: number; total: number }[];
@@ -63,26 +67,28 @@ async function fetchBiorxivPage(
   return response.json() as Promise<BiorxivApiResponse>;
 }
 
-export async function ingestBiorxivPapers(options: {
+/**
+ * bioRxiv API から論文メタデータを取得し、JSON ファイルとして保存する。
+ * Chroma への投入は行わない。
+ */
+export async function fetchBiorxivPapers(options: {
   startDate: string;
   endDate: string;
+  outputDir?: string;
   category?: string;
   batchSize?: number;
   delayMs?: number;
-}): Promise<number> {
+}): Promise<{ outputPath: string; totalFetched: number }> {
   const settings = loadSettings();
   const category = options.category ?? settings.biorxivCategory;
   const batchSize = options.batchSize ?? settings.ingestionBatchSize;
   const delayMs = options.delayMs ?? 1000;
+  const outputDir = options.outputDir ?? DEFAULT_OUTPUT_DIR;
 
-  const store = new ChromaStore({
-    collectionName: settings.chromaCollectionName,
-    openaiApiKey: settings.openaiApiKey,
-    embeddingModel: settings.embeddingModel,
-  });
+  fs.mkdirSync(outputDir, { recursive: true });
 
+  const allPapers: BiorxivPaper[] = [];
   let cursor = 0;
-  let totalIngested = 0;
 
   while (true) {
     const response = await fetchBiorxivPage(
@@ -94,33 +100,19 @@ export async function ingestBiorxivPapers(options: {
 
     const entries = response.collection ?? [];
     if (entries.length === 0) {
-      logger.info('No more entries. Ingestion complete.');
+      logger.info('No more entries from API.');
       break;
     }
 
     const papers = entries.map(apiEntryToPaper);
-
-    // 重複チェック: 既にDBにある論文はスキップ
-    const newPapers: BiorxivPaper[] = [];
-    for (const paper of papers) {
-      const alreadyExists = await store.exists(paper.doi);
-      if (!alreadyExists) {
-        newPapers.push(paper);
-      }
-    }
-
-    if (newPapers.length > 0) {
-      await store.addDocuments(newPapers);
-      totalIngested += newPapers.length;
-    }
+    allPapers.push(...papers);
 
     logger.info(
-      `Processed ${entries.length} entries (${newPapers.length} new). Total ingested: ${totalIngested}`,
+      `Fetched ${entries.length} entries (total so far: ${allPapers.length})`,
     );
 
     // ページネーション: 100件ずつ
-    const status = response.messages?.[0];
-    if (!status || entries.length < batchSize) {
+    if (entries.length < batchSize) {
       logger.info('Reached end of results.');
       break;
     }
@@ -131,12 +123,15 @@ export async function ingestBiorxivPapers(options: {
     await new Promise((resolve) => setTimeout(resolve, delayMs));
   }
 
-  const totalCount = await store.getDocumentCount();
-  logger.info(
-    `Ingestion complete. ${totalIngested} new papers added. Total in collection: ${totalCount}`,
-  );
+  // JSON ファイルに保存
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const fileName = `biorxiv_${options.startDate}_${options.endDate}_${timestamp}.json`;
+  const outputPath = path.join(outputDir, fileName);
 
-  return totalIngested;
+  fs.writeFileSync(outputPath, JSON.stringify(allPapers, null, 2), 'utf-8');
+  logger.info(`Saved ${allPapers.length} papers to ${outputPath}`);
+
+  return { outputPath, totalFetched: allPapers.length };
 }
 
 // --- CLI エントリーポイント ---
@@ -146,6 +141,7 @@ async function main(): Promise<void> {
   let startDate = '';
   let endDate = '';
   let category: string | undefined;
+  let outputDir: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--start' && args[i + 1]) {
@@ -157,20 +153,26 @@ async function main(): Promise<void> {
     } else if (args[i] === '--category' && args[i + 1]) {
       category = args[i + 1]!;
       i++;
+    } else if (args[i] === '--output' && args[i + 1]) {
+      outputDir = args[i + 1]!;
+      i++;
     }
   }
 
   if (!startDate || !endDate) {
-    console.error('Usage: npx tsx rag/biorxiv-ingester.ts --start YYYY-MM-DD --end YYYY-MM-DD [--category bioinformatics]');
+    console.error(
+      'Usage: npx tsx rag/biorxiv-fetcher.ts --start YYYY-MM-DD --end YYYY-MM-DD [--category bioinformatics] [--output storage/biorxiv-tmp]',
+    );
     process.exit(1);
   }
 
-  const count = await ingestBiorxivPapers({
+  const result = await fetchBiorxivPapers({
     startDate,
     endDate,
     ...(category != null ? { category } : {}),
+    ...(outputDir != null ? { outputDir } : {}),
   });
-  console.log(`Done! Ingested ${count} papers.`);
+  console.log(`Done! Fetched ${result.totalFetched} papers → ${result.outputPath}`);
 }
 
 main();
