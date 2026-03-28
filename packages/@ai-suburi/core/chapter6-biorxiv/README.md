@@ -80,11 +80,17 @@ npx tsx chapter6-biorxiv/rag/biorxiv-fetcher.ts --start 2025-01-01 --end 2025-03
 
 # エラーで中断した場合、--resume で前回の続きから再開
 npx tsx chapter6-biorxiv/rag/biorxiv-fetcher.ts --start 2025-01-01 --end 2025-03-28 --resume
+
+# 既存 JSONL に別の日付範囲を追加取得
+npx tsx chapter6-biorxiv/rag/biorxiv-fetcher.ts --start 2025-03-28 --end 2025-04-10 \
+  --append storage/biorxiv-tmp/biorxiv_2025-01-01_2025-03-28_*.jsonl
 ```
 
 JSONL ファイルは `storage/biorxiv-tmp/` に保存される（1行1論文の JSON Lines 形式）。bioRxiv API は 100 件/リクエストでページネーションされる。bioinformatics カテゴリは約 40,000 件以上あるため、まずは短い日付範囲から始めることを推奨。
 
-429（レート制限）や 5xx エラー時はエクスポネンシャルバックオフで自動リトライする。プロセス自体が中断された場合は `--resume` でプログレスファイルから再開可能。
+- **自動リトライ**: 429（レート制限）や 5xx エラー時にエクスポネンシャルバックオフで自動リトライ
+- **レジューム**: プロセスが中断された場合、`--resume` でプログレスファイルから再開可能
+- **追記取得**: `--append <file>` で既存 JSONL に別の日付範囲のデータを追加取得可能
 
 ### Step 2: Qdrant にデータ投入
 
