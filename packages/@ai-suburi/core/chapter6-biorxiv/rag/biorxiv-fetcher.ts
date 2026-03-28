@@ -165,11 +165,13 @@ function deleteProgress(
  *
  * - リトライ: 429/5xx/ネットワークエラー時にエクスポネンシャルバックオフで自動リトライ
  * - レジューム: プログレスファイルでカーソル位置を記録。中断後 --resume で再開可能
+ * - 追記: --append で既存 JSONL ファイルに別の日付範囲のデータを追加取得可能
  */
 export async function fetchBiorxivPapers(options: {
   startDate: string;
   endDate: string;
   outputDir?: string;
+  appendTo?: string;
   category?: string;
   batchSize?: number;
   delayMs?: number;
@@ -207,6 +209,13 @@ export async function fetchBiorxivPapers(options: {
       const fileName = `biorxiv_${options.startDate}_${options.endDate}_${timestamp}.jsonl`;
       outputPath = path.join(outputDir, fileName);
     }
+  } else if (options.appendTo) {
+    // 追記モード: 既存ファイルに追加
+    if (!fs.existsSync(options.appendTo)) {
+      throw new Error(`Append target not found: ${options.appendTo}`);
+    }
+    outputPath = options.appendTo;
+    logger.info(`Appending to existing file: ${outputPath}`);
   } else {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const fileName = `biorxiv_${options.startDate}_${options.endDate}_${timestamp}.jsonl`;
@@ -292,6 +301,7 @@ async function main(): Promise<void> {
   let endDate = '';
   let category: string | undefined;
   let outputDir: string | undefined;
+  let appendTo: string | undefined;
   let resume = false;
 
   for (let i = 0; i < args.length; i++) {
@@ -307,6 +317,9 @@ async function main(): Promise<void> {
     } else if (args[i] === '--output' && args[i + 1]) {
       outputDir = args[i + 1]!;
       i++;
+    } else if (args[i] === '--append' && args[i + 1]) {
+      appendTo = args[i + 1]!;
+      i++;
     } else if (args[i] === '--resume') {
       resume = true;
     }
@@ -314,8 +327,14 @@ async function main(): Promise<void> {
 
   if (!startDate || !endDate) {
     console.error(
-      'Usage: npx tsx rag/biorxiv-fetcher.ts --start YYYY-MM-DD --end YYYY-MM-DD [--category bioinformatics] [--output storage/biorxiv-tmp] [--resume]',
+      'Usage: npx tsx rag/biorxiv-fetcher.ts --start YYYY-MM-DD --end YYYY-MM-DD [options]',
     );
+    console.error('');
+    console.error('Options:');
+    console.error('  --category <name>    bioRxiv カテゴリ（デフォルト: bioinformatics）');
+    console.error('  --output <dir>       出力ディレクトリ（デフォルト: storage/biorxiv-tmp）');
+    console.error('  --append <file>      既存 JSONL ファイルに追記');
+    console.error('  --resume             前回の中断地点から再開');
     process.exit(1);
   }
 
@@ -325,6 +344,7 @@ async function main(): Promise<void> {
       endDate,
       ...(category != null ? { category } : {}),
       ...(outputDir != null ? { outputDir } : {}),
+      ...(appendTo != null ? { appendTo } : {}),
       resume,
     });
     console.log(
