@@ -92,6 +92,21 @@ JSONL ファイルは `storage/biorxiv-tmp/` に保存される（1行1論文の
 - **レジューム**: プロセスが中断された場合、`--resume` でプログレスファイルから再開可能
 - **追記取得**: `--append <file>` で既存 JSONL に別の日付範囲のデータを追加取得可能
 
+### Step 1.5: JSONL の重複除去（任意）
+
+bioRxiv API は同じ DOI の複数バージョンを返す場合がある。Qdrant 投入前に各 DOI の最新バージョンのみ残して重複を除去できる。
+
+```bash
+# 別ファイルに出力（*_dedup.jsonl）
+npx tsx chapter6-biorxiv/rag/dedup-jsonl.ts storage/biorxiv-tmp/biorxiv_2021-03-01_2025-03-27_*.jsonl
+
+# 元ファイルを直接置き換え
+npx tsx chapter6-biorxiv/rag/dedup-jsonl.ts storage/biorxiv-tmp/biorxiv_2021-03-01_2025-03-27_*.jsonl --in-place
+
+# 出力先を指定
+npx tsx chapter6-biorxiv/rag/dedup-jsonl.ts --input input.jsonl --output clean.jsonl
+```
+
 ### Step 2: Qdrant にデータ投入
 
 Step 1 で保存した JSONL ファイルを行単位でストリーム読み込みし、Qdrant ベクトルDB に投入する。大量データでもメモリを圧迫しない。
@@ -148,6 +163,7 @@ chapter6-biorxiv/
 │   └── prompts/                 # プロンプトテンプレート（10ファイル）
 ├── rag/
 │   ├── biorxiv-fetcher.ts       # Step A: bioRxiv API → JSONL 保存（逐次追記）
+│   ├── dedup-jsonl.ts           # JSONL 重複除去（DOI ごとに最新バージョンのみ残す）
 │   ├── qdrant-loader.ts         # Step B: JSONL → Qdrant 投入（ストリーム読み込み）
 │   ├── qdrant-store.ts          # Qdrant クライアント
 │   └── rag-searcher.ts          # RAG 検索 + リランキング
