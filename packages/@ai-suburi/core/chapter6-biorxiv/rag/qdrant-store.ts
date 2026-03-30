@@ -1,8 +1,8 @@
+import { createHash } from 'node:crypto';
 import { QdrantClient } from '@qdrant/js-client-rest';
 import OpenAI from 'openai';
-
-import type { BiorxivPaper } from '../models.js';
 import { setupLogger } from '../custom-logger.js';
+import type { BiorxivPaper } from '../models.js';
 
 const logger = setupLogger('qdrant-store');
 
@@ -63,9 +63,7 @@ export class QdrantStore {
   async addDocuments(papers: BiorxivPaper[]): Promise<void> {
     await this.ensureCollection();
 
-    const documents = papers.map(
-      (p) => `${p.title}\n\n${p.abstract}`,
-    );
+    const documents = papers.map((p) => `${p.title}\n\n${p.abstract}`);
     const embeddings = await this.getEmbeddings(documents);
 
     const points = papers.map((paper, i) => ({
@@ -135,9 +133,10 @@ export class QdrantStore {
     return results.points.length > 0;
   }
 
-  /** DOI をハッシュして数値 ID に変換（Qdrant は数値 or UUID を ID に使う） */
+  /** DOI を SHA-1 ハッシュして UUID v5 形式の文字列に変換（Qdrant は数値 or UUID を ID に使う） */
   private doiToPointId(doi: string): string {
-    // UUID v5 的なことをせず、DOI 文字列をそのまま使う（Qdrant は文字列 ID もサポート）
-    return doi;
+    const hash = createHash('sha1').update(doi).digest('hex');
+    // SHA-1 の先頭 32 文字を UUID 形式 (8-4-4-4-12) に整形
+    return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-${hash.slice(12, 16)}-${hash.slice(16, 20)}-${hash.slice(20, 32)}`;
   }
 }

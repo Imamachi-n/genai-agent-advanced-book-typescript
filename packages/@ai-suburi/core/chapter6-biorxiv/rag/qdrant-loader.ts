@@ -1,9 +1,8 @@
 import * as fs from 'node:fs';
 import * as readline from 'node:readline';
-
-import type { BiorxivPaper } from '../models.js';
 import { loadSettings } from '../configs.js';
 import { setupLogger } from '../custom-logger.js';
+import type { BiorxivPaper } from '../models.js';
 import { QdrantStore } from './qdrant-store.js';
 
 const logger = setupLogger('qdrant-loader');
@@ -96,9 +95,7 @@ async function processBatch(
     loaded = newPapers.length;
   }
 
-  logger.info(
-    `Batch ${batchNumber + 1}: ${loaded} added, ${skipped} skipped`,
-  );
+  logger.info(`Batch ${batchNumber + 1}: ${loaded} added, ${skipped} skipped`);
 
   return { loaded, skipped };
 }
