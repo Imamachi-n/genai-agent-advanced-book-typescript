@@ -29,11 +29,11 @@ export class HearingChain {
 
     const nextNode = hearing.is_need_human_feedback
       ? 'human_feedback'
-      : 'goal_setting';
+      : 'select_mode';
 
     return new Command({
       goto: nextNode,
-      update: { hearing, messages: message, analysisMode: hearing.analysis_mode },
+      update: { hearing, messages: message },
     });
   }
 

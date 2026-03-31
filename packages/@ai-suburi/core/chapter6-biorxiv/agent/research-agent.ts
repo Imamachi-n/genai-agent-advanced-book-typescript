@@ -164,11 +164,15 @@ export class ResearchAgent {
       .addNode('user_hearing', (state) => {
         logger.info('|--> user_hearing');
         return userHearing.invoke(state);
-      }, { ends: ['human_feedback', 'goal_setting'] })
+      }, { ends: ['human_feedback', 'select_mode'] })
       .addNode('human_feedback', (state: Record<string, unknown>) => {
         logger.info('|--> human_feedback');
         return this.humanFeedback(state);
       }, { ends: ['user_hearing'] })
+      .addNode('select_mode', () => {
+        logger.info('|--> select_mode');
+        return this.selectMode();
+      }, { ends: ['goal_setting'] })
       .addNode('goal_setting', (state) => {
         logger.info('|--> goal_setting');
         return goalSetting.invoke(state);
@@ -192,6 +196,26 @@ export class ResearchAgent {
       .addEdge('__start__', 'user_hearing');
 
     return workflow.compile({ checkpointer });
+  }
+
+  /**
+   * select_mode ノードの処理。interrupt で分析モードの選択をユーザーに求める。
+   * @returns goal_setting への遷移コマンド（analysisMode を含む）
+   */
+  private selectMode(): Command {
+    const selection = interrupt(
+      '分析モードを選択してください:\n1. 簡易版（タイトル+アブストラクトのみ・高速）\n2. 詳細版（PDF全文分析・高精度）',
+    );
+
+    const mode: 'simple' | 'detailed' =
+      selection === '1' || selection === 'simple' ? 'simple' : 'detailed';
+
+    logger.info(`分析モード: ${mode}`);
+
+    return new Command({
+      goto: 'goal_setting',
+      update: { analysisMode: mode },
+    });
   }
 
   /**
@@ -279,16 +303,7 @@ export async function invokeWorkflow(
     }
 
     // 対話モード: ユーザー入力を受け付ける
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-    });
-    const userInput = await new Promise<string>((resolve) => {
-      rl.question('User Feedback: ', (answer) => {
-        rl.close();
-        resolve(answer);
-      });
-    });
+    const userInput = await promptUser('User Feedback: ');
     return invokeWorkflow(
       workflow,
       new Command({ resume: userInput }),
@@ -296,7 +311,48 @@ export async function invokeWorkflow(
       options,
     );
   }
+
+  // select_mode ノードで中断された場合の処理（finalOutput がまだない = ワークフロー未完了）
+  if (result.finalOutput === '' || result.finalOutput == null) {
+    if (options.skipFeedback) {
+      logger.info('select_mode をスキップ（デフォルト: detailed）');
+      return invokeWorkflow(
+        workflow,
+        new Command({ resume: '2' }),
+        config,
+        options,
+      );
+    }
+
+    // 対話モード: モード選択をユーザーに求める
+    const modeInput = await promptUser('モード選択 (1: 簡易版 / 2: 詳細版): ');
+    return invokeWorkflow(
+      workflow,
+      new Command({ resume: modeInput }),
+      config,
+      options,
+    );
+  }
+
   return result;
+}
+
+/**
+ * CLI でユーザー入力を受け付けるヘルパー関数。
+ * @param question - 表示するプロンプト文字列
+ * @returns ユーザーの入力文字列
+ */
+async function promptUser(question: string): Promise<string> {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+  return new Promise<string>((resolve) => {
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer);
+    });
+  });
 }
 
 /** --- LangGraph Studio 用のグラフエクスポート --- */

@@ -61,11 +61,6 @@ export const hearingSchema = z.object({
     .boolean()
     .describe('追加の質問が必要かどうか'),
   additional_question: z.string().describe('追加の質問'),
-  analysis_mode: z
-    .enum(['simple', 'detailed'])
-    .describe(
-      '分析モード。simple: タイトルとアブストラクトのみで簡易レポート、detailed: PDF全文を取得して詳細レポート',
-    ),
 });
 export type Hearing = z.infer<typeof hearingSchema>;
 
