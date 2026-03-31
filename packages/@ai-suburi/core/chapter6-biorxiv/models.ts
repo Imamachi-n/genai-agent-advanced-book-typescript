@@ -15,6 +15,11 @@ export const biorxivPaperSchema = z.object({
 });
 export type BiorxivPaper = z.infer<typeof biorxivPaperSchema>;
 
+/**
+ * BiorxivPaper オブジェクトを XML 文字列に変換する。
+ * @param paper - 変換対象の論文データ
+ * @returns XML 形式の文字列
+ */
 export function biorxivPaperToXml(paper: BiorxivPaper): string {
   return `<paper>
   <doi>${paper.doi}</doi>
@@ -80,3 +85,50 @@ export const sufficiencySchema = z.object({
   reason: z.string().describe('十分性の判断理由'),
 });
 export type Sufficiency = z.infer<typeof sufficiencySchema>;
+
+// --- 論文リストフォーマット ---
+
+/**
+ * 検索でヒットした論文をURLリンク付きのMarkdownリストにフォーマットする。
+ * タスクごとにグルーピングし、タイトル・DOI・リンクを表示する。
+ */
+export function formatPaperList(results: ReadingResult[]): string {
+  if (results.length === 0) {
+    return '検索にヒットした論文はありませんでした。';
+  }
+
+  // タスクごとにグルーピング
+  const taskGroups = new Map<string, ReadingResult[]>();
+  for (const result of results) {
+    const existing = taskGroups.get(result.task) ?? [];
+    existing.push(result);
+    taskGroups.set(result.task, existing);
+  }
+
+  const lines: string[] = ['## 検索ヒット論文一覧\n'];
+
+  for (const [task, taskResults] of taskGroups) {
+    lines.push(`### タスク: ${task}\n`);
+
+    // 同一タスク内で DOI の重複を排除
+    const seen = new Set<string>();
+    for (const r of taskResults) {
+      if (seen.has(r.paper.doi)) continue;
+      seen.add(r.paper.doi);
+
+      const score =
+        r.paper.relevanceScore != null
+          ? ` (関連度: ${r.paper.relevanceScore.toFixed(2)})`
+          : '';
+      lines.push(
+        `- [${r.paper.title}](${r.paper.link})${score}`,
+        `  - DOI: ${r.paper.doi}`,
+        `  - 著者: ${r.paper.authors.join(', ')}`,
+        `  - 公開日: ${r.paper.published}`,
+      );
+    }
+    lines.push('');
+  }
+
+  return lines.join('\n').trimEnd();
+}

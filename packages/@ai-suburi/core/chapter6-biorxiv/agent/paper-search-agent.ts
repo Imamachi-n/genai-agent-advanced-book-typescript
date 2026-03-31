@@ -7,7 +7,7 @@ import type { ChatOpenAI } from '@langchain/openai';
 
 import { PaperProcessor } from '../chains/paper-processor-chain.js';
 import { setupLogger } from '../custom-logger.js';
-import type { ReadingResult } from '../models.js';
+import { type ReadingResult, formatPaperList } from '../models.js';
 import type { Searcher } from '../searcher/searcher.js';
 import { PaperAnalyzerAgent } from './paper-analyzer-agent.js';
 
@@ -32,12 +32,19 @@ const PaperSearchAgentAnnotation = Annotation.Root({
     reducer: (_prev, next) => next,
     default: () => [],
   }),
+  searchedPaperList: Annotation<string>({
+    reducer: (_prev, next) => next,
+    default: () => '',
+  }),
 });
 
 type PaperSearchAgentState = typeof PaperSearchAgentAnnotation.State;
 
 // --- Agent ---
 
+/**
+ * 論文検索エージェント。RAG 検索で論文を取得し、各論文を並列に分析して関連論文をフィルタリングする。
+ */
 export class PaperSearchAgent {
   readonly graph: CompiledStateGraph<any, any, any, any>;
   private recursionLimit: number;
@@ -59,6 +66,11 @@ export class PaperSearchAgent {
     this.graph = this.createGraph(paperProcessor);
   }
 
+  /**
+   * 論文検索エージェントの LangGraph ワークフローを構築する。
+   * @param paperProcessor - RAG 検索と PDF 変換を行うプロセッサ
+   * @returns コンパイル済みの StateGraph
+   */
   private createGraph(
     paperProcessor: PaperProcessor,
   ): CompiledStateGraph<any, any, any, any> {
@@ -81,6 +93,12 @@ export class PaperSearchAgent {
     return workflow.compile();
   }
 
+  /**
+   * PaperAnalyzerAgent サブグラフを実行し、個別論文の分析結果を返す。
+   * @param state - analyze_paper ノードの入力状態
+   * @param config - LangGraph 実行設定
+   * @returns processingReadingResults に追加する分析結果
+   */
   private async analyzePaper(
     state: Record<string, unknown>,
     config: LangGraphRunnableConfig,
@@ -95,14 +113,24 @@ export class PaperSearchAgent {
     };
   }
 
+  /**
+   * 分析済みの論文結果を整理し、関連論文のみをフィルタリングしてURLリンク付きリストを生成する。
+   * @param state - organize_results ノードの入力状態
+   * @returns readingResults（関連論文のみ）と searchedPaperList（全論文のリスト）
+   */
   private organizeResults(
     state: PaperSearchAgentState,
   ): Record<string, unknown> {
     const processingReadingResults =
       state.processingReadingResults ?? [];
+
+    // 検索でヒットした全論文をURLリンク付きでリストアップ
+    const searchedPaperList = formatPaperList(processingReadingResults);
+    logger.info(`\n${searchedPaperList}`);
+
     const readingResults = processingReadingResults.filter(
       (result) => result && result.isRelated === true,
     );
-    return { readingResults };
+    return { readingResults, searchedPaperList };
   }
 }

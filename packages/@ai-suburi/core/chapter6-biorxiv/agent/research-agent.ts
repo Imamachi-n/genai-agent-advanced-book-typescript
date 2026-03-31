@@ -67,6 +67,10 @@ const ResearchAgentAnnotation = Annotation.Root({
     reducer: (_prev, next) => next,
     default: () => 0,
   }),
+  searchedPaperList: Annotation<string>({
+    reducer: (_prev, next) => next,
+    default: () => '',
+  }),
   // Output
   finalOutput: Annotation<string>({
     reducer: (_prev, next) => next,
@@ -76,6 +80,9 @@ const ResearchAgentAnnotation = Annotation.Root({
 
 // --- Agent ---
 
+/**
+ * リサーチエージェント。ユーザーの質問からゴール設定・クエリ分解・論文検索・評価・レポート生成までを統括する。
+ */
 export class ResearchAgent {
   readonly graph: CompiledStateGraph<any, any, any, any>;
   private recursionLimit: number;
@@ -131,6 +138,15 @@ export class ResearchAgent {
     );
   }
 
+  /**
+   * リサーチエージェントの LangGraph ワークフローを構築する。
+   * @param userHearing - ユーザー意図のヒアリングチェーン
+   * @param goalSetting - ゴール最適化チェーン
+   * @param decomposeQuery - クエリ分解チェーン
+   * @param evaluateTask - タスク評価チェーン
+   * @param generateReport - レポート生成チェーン
+   * @returns コンパイル済みの StateGraph
+   */
   private createGraph(
     userHearing: HearingChain,
     goalSetting: GoalOptimizer,
@@ -174,6 +190,11 @@ export class ResearchAgent {
     return workflow.compile({ checkpointer });
   }
 
+  /**
+   * human_feedback ノードの処理。interrupt でユーザー入力を受け取り、user_hearing へ遷移する。
+   * @param state - 現在のワークフロー状態
+   * @returns user_hearing への遷移コマンド
+   */
   private humanFeedback(
     state: Record<string, unknown>,
   ): Command {
@@ -197,6 +218,12 @@ export class ResearchAgent {
     });
   }
 
+  /**
+   * PaperSearchAgent サブグラフを実行し、結果を evaluate_task へ渡す。
+   * @param state - 現在のワークフロー状態
+   * @param config - LangGraph 実行設定
+   * @returns evaluate_task への遷移コマンド（readingResults と searchedPaperList を含む）
+   */
   private async invokePaperSearchAgent(
     state: Record<string, unknown>,
     config: LangGraphRunnableConfig,
@@ -209,6 +236,7 @@ export class ResearchAgent {
       goto: 'evaluate_task',
       update: {
         readingResults: (output.readingResults as ReadingResult[]) ?? [],
+        searchedPaperList: (output.searchedPaperList as string) ?? '',
       },
     });
   }
@@ -216,6 +244,14 @@ export class ResearchAgent {
 
 // --- ワークフロー実行 ---
 
+/**
+ * LangGraph ワークフローを実行し、human_feedback による中断時はユーザー入力を受け付けて再開する。
+ * @param workflow - コンパイル済みの StateGraph
+ * @param inputData - ワークフローへの入力データまたは再開用 Command
+ * @param config - 実行設定（thread_id や recursionLimit など）
+ * @param options - human_feedback スキップなどのオプション
+ * @returns ワークフローの最終出力
+ */
 export async function invokeWorkflow(
   workflow: CompiledStateGraph<any, any, any, any>,
   inputData: Record<string, unknown> | Command,
@@ -265,11 +301,14 @@ export const graph = new ResearchAgent().graph;
 
 // --- エントリーポイント ---
 
+/**
+ * CLI エントリーポイント。ユーザークエリを受け取りリサーチエージェントを実行する。
+ */
 async function main(): Promise<void> {
   const skipFeedback = process.argv.includes('--skip-feedback');
   const args = process.argv.filter((a) => !a.startsWith('--'));
   const userQuery = args[2] ?? 'single-cell RNA-seq解析の最新手法について調べる';
-  const recursionLimit = Number(args[3] ?? '1000');
+  const recursionLimit = Number(args[3] ?? 5);
 
   const agent = new ResearchAgent();
   const result = await invokeWorkflow(
