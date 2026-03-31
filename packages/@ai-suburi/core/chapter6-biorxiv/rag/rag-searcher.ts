@@ -136,7 +136,7 @@ export class RagSearcher implements Searcher {
       .map((s) => s.paper);
   }
 
-  async run(goalSetting: string, query: string): Promise<BiorxivPaper[]> {
+  async run(goalSetting: string, query: string, excludeDois: string[] = []): Promise<BiorxivPaper[]> {
     let retryCount = 0;
     let feedback = '';
     let papers: BiorxivPaper[] = [];
@@ -149,7 +149,7 @@ export class RagSearcher implements Searcher {
       );
       logger.info(`Searching with query: "${expandedQuery}"`);
 
-      papers = await this.store.search(expandedQuery, this.maxSearchResults);
+      papers = await this.store.search(expandedQuery, this.maxSearchResults, excludeDois);
 
       if (this.debug) {
         logger.info(`Found ${papers.length} papers from Chroma.`);

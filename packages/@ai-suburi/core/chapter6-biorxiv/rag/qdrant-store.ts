@@ -88,15 +88,25 @@ export class QdrantStore {
     );
   }
 
-  async search(query: string, topK: number = 20): Promise<BiorxivPaper[]> {
+  async search(query: string, topK: number = 20, excludeDois: string[] = []): Promise<BiorxivPaper[]> {
     await this.ensureCollection();
 
     const queryEmbeddings = await this.getEmbeddings([query]);
+
+    const filter = excludeDois.length > 0
+      ? {
+          must_not: excludeDois.map((doi) => ({
+            key: 'doi' as const,
+            match: { value: doi },
+          })),
+        }
+      : undefined;
 
     const results = await this.client.search(this.collectionName, {
       vector: queryEmbeddings[0]!,
       limit: topK,
       with_payload: true,
+      ...(filter ? { filter } : {}),
     });
 
     return results.map((result) => {

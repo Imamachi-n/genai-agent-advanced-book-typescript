@@ -31,7 +31,10 @@ export class QueryDecomposer {
   async invoke(state: Record<string, unknown>): Promise<Command> {
     const evaluation = state.evaluation as TaskEvaluation | undefined;
     const content = evaluation?.content ?? (state.goal as string) ?? '';
-    const decomposedTasks = await this.run(content);
+    const searchedPaperList = (state.searchedPaperList as string) ?? '';
+    const previousTasks = (state.tasks as string[]) ?? [];
+
+    const decomposedTasks = await this.run(content, searchedPaperList, previousTasks);
 
     return new Command({
       goto: 'paper_search_agent',
@@ -39,7 +42,21 @@ export class QueryDecomposer {
     });
   }
 
-  async run(query: string): Promise<DecomposedTasks> {
+  async run(
+    query: string,
+    searchedPaperList: string = '',
+    previousTasks: string[] = [],
+  ): Promise<DecomposedTasks> {
+    let retryContext = '';
+    if (previousTasks.length > 0) {
+      retryContext += '\n## 前回の調査で使用したサブタスク（これらとは異なるサブタスクを生成してください）\n';
+      retryContext += previousTasks.map((t, i) => `${i + 1}. ${t}`).join('\n');
+    }
+    if (searchedPaperList) {
+      retryContext += '\n## 前回の調査で見つかった論文（これらの論文は既に取得済みです）\n';
+      retryContext += searchedPaperList;
+    }
+
     const prompt = ChatPromptTemplate.fromTemplate(
       loadPrompt('query_decomposer'),
     );
@@ -51,6 +68,7 @@ export class QueryDecomposer {
       max_decomposed_tasks: this.maxDecomposedTasks,
       current_date: this.currentDate,
       query,
+      retry_context: retryContext,
     });
   }
 }

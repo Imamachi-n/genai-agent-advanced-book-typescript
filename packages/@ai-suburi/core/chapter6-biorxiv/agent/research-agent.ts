@@ -295,8 +295,7 @@ export async function invokeWorkflow(
   return result;
 }
 
-// --- LangGraph Studio 用のグラフエクスポート ---
-
+/** --- LangGraph Studio 用のグラフエクスポート --- */
 export const graph = new ResearchAgent().graph;
 
 // --- エントリーポイント ---

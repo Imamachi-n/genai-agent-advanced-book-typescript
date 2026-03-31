@@ -131,6 +131,13 @@ export class PaperSearchAgent {
     const readingResults = processingReadingResults.filter(
       (result) => result && result.isRelated === true,
     );
+
+    const totalCount = processingReadingResults.length;
+    const relatedCount = readingResults.length;
+    logger.info(
+      `論文フィルタリング: 全${totalCount}件 → 関連あり${relatedCount}件（除外${totalCount - relatedCount}件）`,
+    );
+
     return { readingResults, searchedPaperList };
   }
 }

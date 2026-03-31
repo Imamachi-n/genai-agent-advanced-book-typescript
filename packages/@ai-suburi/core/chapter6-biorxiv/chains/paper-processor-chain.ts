@@ -1,9 +1,12 @@
 import { Command, Send } from '@langchain/langgraph';
 
+import { setupLogger } from '../custom-logger.js';
 import type { BiorxivPaper, ReadingResult } from '../models.js';
 import type { Searcher } from '../searcher/searcher.js';
 import { MarkdownStorage } from '../service/markdown-storage.js';
 import { PdfToText } from '../service/pdf-to-text.js';
+
+const logger = setupLogger('paper-processor');
 
 interface PaperProcessorInput {
   goal: string;
@@ -64,17 +67,25 @@ export class PaperProcessor {
     const uniquePapers = new Map<string, BiorxivPaper>();
     const taskPapers = new Map<string, string[]>();
 
-    // タスクの処理
+    // タスクの処理（前のタスクで見つかったDOIを除外しながら検索）
+    const allFoundDois: string[] = [];
     for (const task of state.tasks) {
-      const searchedPapers = await this.searcher.run(state.goal, task);
+      const searchedPapers = await this.searcher.run(state.goal, task, allFoundDois);
+      logger.info(
+        `Task: ${searchedPapers.length}件取得（除外DOI: ${allFoundDois.length}件）`,
+      );
       taskPapers.set(
         task,
         searchedPapers.map((paper) => paper.doi),
       );
       for (const paper of searchedPapers) {
         uniquePapers.set(paper.doi, paper);
+        allFoundDois.push(paper.doi);
       }
     }
+    logger.info(
+      `ユニーク論文数: ${uniquePapers.size}件 / タスク数: ${state.tasks.length}`,
+    );
 
     // 重複排除後の論文リストに対してPDF変換を実行
     const uniquePapersList = Array.from(uniquePapers.values());
