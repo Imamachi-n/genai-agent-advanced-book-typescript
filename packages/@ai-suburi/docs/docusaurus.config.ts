@@ -128,6 +128,10 @@ const config: Config = {
               label: 'Chapter 6: arXiv論文リサーチAIエージェントの実装',
               to: '/docs/ai-agent-practice/chapter6',
             },
+            {
+              label: 'Chapter 6 応用編: bioRxiv × RAG論文リサーチAIエージェント',
+              to: '/docs/ai-agent-practice/chapter6-biorxiv',
+            },
           ],
         },
         {
