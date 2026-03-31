@@ -3,8 +3,8 @@ import { ChatPromptTemplate } from '@langchain/core/prompts';
 import type { ChatOpenAI } from '@langchain/openai';
 import { Command } from '@langchain/langgraph';
 
-import type { ReadingResult } from '../models.js';
-import { dictToXmlStr, loadPrompt } from './utils.js';
+import { type ReadingResult, biorxivPaperToXml } from '../models.js';
+import { loadPrompt } from './utils.js';
 
 export class Reporter {
   private llm: ChatOpenAI;
@@ -21,8 +21,13 @@ export class Reporter {
 
     const context = results
       .map((item) => {
-        const { markdownPath: _mp, ...rest } = item;
-        return dictToXmlStr(rest as unknown as Record<string, unknown>);
+        return `<item>
+<id>${item.id}</id>
+<task>${item.task}</task>
+${biorxivPaperToXml(item.paper)}
+<answer>${item.answer}</answer>
+<is_related>${item.isRelated}</is_related>
+</item>`;
       })
       .join('\n');
 
