@@ -1,0 +1,26 @@
+<paper_information>
+<title>{title}</title>
+<authors>{authors}</authors>
+<abstract>{abstract}</abstract>
+<published>{published}</published>
+</paper_information>
+
+<goal_setting>
+{goal}
+</goal_setting>
+
+<task>
+goal_settingタグで与えられている目標を達成するために、調査タスクとして「{task}」を実施しています。
+paper_informationタグに含まれている論文のタイトルとアブストラクトのみに基づいて、以下を判断してください。
+</task>
+
+<instructions>
+1. この論文が調査タスクに関連しているかどうかを判定してください。
+   - 簡易モードのため、厳密な判定ではなく寛容に判定してください。
+   - アブストラクトの内容がタスクで求められている情報に部分的にでも関連する場合は関連ありと判断してください。
+   - タスクのテーマと全く無関係な場合にのみ関連なしと判断してください。
+2. 関連ありの場合は、アブストラクトから得られる情報に基づいて、タスクに対する簡潔な回答を生成してください。
+   - アブストラクトからの重要なフレーズを引用しつつ、わかりやすく説明してください。
+   - 回答は日本語で記述してください。
+3. 関連なしの場合は、なぜ関連がないかの理由を簡潔に記述してください。
+</instructions>

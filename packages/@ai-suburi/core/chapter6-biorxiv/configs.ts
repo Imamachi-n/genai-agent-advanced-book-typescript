@@ -17,6 +17,8 @@ export interface Settings {
   maxPapers: number;
   maxWorkers: number;
   maxRecursionLimit: number;
+  // 分析モード
+  analysisMode: 'simple' | 'detailed';
   // RAG設定
   qdrantCollectionName: string;
   qdrantUrl: string;
@@ -50,6 +52,9 @@ export function loadSettings(): Settings {
     maxPapers: Number(process.env.MAX_PAPERS ?? '3'),
     maxWorkers: Number(process.env.MAX_WORKERS ?? '3'),
     maxRecursionLimit: Number(process.env.MAX_RECURSION_LIMIT ?? '1000'),
+    // 分析モード
+    analysisMode:
+      (process.env.ANALYSIS_MODE as 'simple' | 'detailed') ?? 'detailed',
     // RAG設定
     qdrantCollectionName:
       process.env.QDRANT_COLLECTION_NAME ?? 'biorxiv-bioinformatics',

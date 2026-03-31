@@ -6,6 +6,7 @@ import type {
 import type { ChatOpenAI } from '@langchain/openai';
 
 import { PaperProcessor } from '../chains/paper-processor-chain.js';
+import { SimpleAnalyzer } from '../chains/simple-analyzer-chain.js';
 import { setupLogger } from '../custom-logger.js';
 import { type ReadingResult, formatPaperList } from '../models.js';
 import type { Searcher } from '../searcher/searcher.js';
@@ -21,6 +22,10 @@ const PaperSearchAgentAnnotation = Annotation.Root({
   tasks: Annotation<string[]>({
     reducer: (_prev, next) => next,
     default: () => [],
+  }),
+  analysisMode: Annotation<'simple' | 'detailed'>({
+    reducer: (_prev, next) => next,
+    default: () => 'detailed',
   }),
   // Processing (operator.add 相当: 追加蓄積)
   processingReadingResults: Annotation<ReadingResult[]>({
@@ -49,6 +54,7 @@ export class PaperSearchAgent {
   readonly graph: CompiledStateGraph<any, any, any, any>;
   private recursionLimit: number;
   private paperAnalyzer: PaperAnalyzerAgent;
+  private simpleAnalyzer: SimpleAnalyzer;
 
   constructor(
     llm: ChatOpenAI,
@@ -62,6 +68,7 @@ export class PaperSearchAgent {
     const maxWorkers = options.maxWorkers ?? 3;
     const paperProcessor = new PaperProcessor(searcher, maxWorkers);
     this.paperAnalyzer = new PaperAnalyzerAgent(llm);
+    this.simpleAnalyzer = new SimpleAnalyzer(llm);
 
     this.graph = this.createGraph(paperProcessor);
   }
@@ -78,17 +85,22 @@ export class PaperSearchAgent {
       .addNode('search_papers', (state) => {
         logger.info('|--> search_papers');
         return paperProcessor.invoke(state);
-      }, { ends: ['analyze_paper'] })
+      }, { ends: ['analyze_paper', 'simple_analyze_paper'] })
       .addNode('analyze_paper', (state, config) => {
         logger.info('|--> analyze_paper');
         return this.analyzePaper(state, config);
+      })
+      .addNode('simple_analyze_paper', async (state) => {
+        logger.info('|--> simple_analyze_paper');
+        return this.simpleAnalyzePaper(state);
       })
       .addNode('organize_results', (state: PaperSearchAgentState) => {
         logger.info('|--> organize_results');
         return this.organizeResults(state);
       })
       .addEdge('__start__', 'search_papers')
-      .addEdge('analyze_paper', 'organize_results');
+      .addEdge('analyze_paper', 'organize_results')
+      .addEdge('simple_analyze_paper', 'organize_results');
 
     return workflow.compile();
   }
@@ -107,6 +119,21 @@ export class PaperSearchAgent {
       ...config,
       recursionLimit: this.recursionLimit,
     });
+    const readingResult = output.readingResult as ReadingResult | undefined;
+    return {
+      processingReadingResults: readingResult ? [readingResult] : [],
+    };
+  }
+
+  /**
+   * SimpleAnalyzer で論文を簡易分析し、結果を processingReadingResults に追加する。
+   * @param state - simple_analyze_paper ノードの入力状態
+   * @returns processingReadingResults に追加する分析結果
+   */
+  private async simpleAnalyzePaper(
+    state: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const output = await this.simpleAnalyzer.invoke(state);
     const readingResult = output.readingResult as ReadingResult | undefined;
     return {
       processingReadingResults: readingResult ? [readingResult] : [],

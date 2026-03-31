@@ -61,6 +61,11 @@ export const hearingSchema = z.object({
     .boolean()
     .describe('追加の質問が必要かどうか'),
   additional_question: z.string().describe('追加の質問'),
+  analysis_mode: z
+    .enum(['simple', 'detailed'])
+    .describe(
+      '分析モード。simple: タイトルとアブストラクトのみで簡易レポート、detailed: PDF全文を取得して詳細レポート',
+    ),
 });
 export type Hearing = z.infer<typeof hearingSchema>;
 
@@ -79,6 +84,18 @@ export const taskEvaluationSchema = z.object({
     .describe('追加の調査として必要な内容を詳細に日本語で記述'),
 });
 export type TaskEvaluation = z.infer<typeof taskEvaluationSchema>;
+
+export const simpleAnalysisSchema = z.object({
+  is_related: z
+    .boolean()
+    .describe('論文がタスクに関連しているかどうか'),
+  answer: z
+    .string()
+    .describe(
+      'アブストラクトに基づく簡潔な回答、または無関係の理由',
+    ),
+});
+export type SimpleAnalysis = z.infer<typeof simpleAnalysisSchema>;
 
 export const sufficiencySchema = z.object({
   is_sufficient: z.boolean().describe('十分かどうか'),

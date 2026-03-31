@@ -25,17 +25,19 @@ export class PaperProcessor {
   }
 
   async invoke(state: Record<string, unknown>): Promise<Command> {
+    const analysisMode = (state.analysisMode as 'simple' | 'detailed') ?? 'detailed';
     const input: PaperProcessorInput = {
       goal: (state.goal as string) ?? '',
       tasks: (state.tasks as string[]) ?? [],
     };
 
-    const gotos: Send[] = [];
-    const readingResults = await this.run(input);
+    const readingResults = await this.run(input, analysisMode);
+    const targetNode = analysisMode === 'simple' ? 'simple_analyze_paper' : 'analyze_paper';
 
+    const gotos: Send[] = [];
     for (const readingResult of readingResults) {
       gotos.push(
-        new Send('analyze_paper', {
+        new Send(targetNode, {
           goal: input.goal,
           readingResult,
         }),
@@ -61,7 +63,10 @@ export class PaperProcessor {
     return Promise.all(promises);
   }
 
-  async run(state: PaperProcessorInput): Promise<ReadingResult[]> {
+  async run(
+    state: PaperProcessorInput,
+    analysisMode: 'simple' | 'detailed' = 'detailed',
+  ): Promise<ReadingResult[]> {
     let resultIndex = 0;
     const readingResults: ReadingResult[] = [];
     const uniquePapers = new Map<string, BiorxivPaper>();
@@ -87,9 +92,15 @@ export class PaperProcessor {
       `ユニーク論文数: ${uniquePapers.size}件 / タスク数: ${state.tasks.length}`,
     );
 
-    // 重複排除後の論文リストに対してPDF変換を実行
+    // 詳細モード: PDF変換を実行、簡易モード: スキップ
     const uniquePapersList = Array.from(uniquePapers.values());
-    const markdownPaths = await this.convertPdfs(uniquePapersList);
+    let markdownPaths: string[];
+    if (analysisMode === 'detailed') {
+      markdownPaths = await this.convertPdfs(uniquePapersList);
+    } else {
+      logger.info('簡易モード: PDF変換をスキップ');
+      markdownPaths = uniquePapersList.map(() => '');
+    }
 
     // 各タスクに対して関連する論文を割り当て
     const uniqueKeys = Array.from(uniquePapers.keys());

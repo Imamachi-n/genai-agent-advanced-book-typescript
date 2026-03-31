@@ -71,6 +71,10 @@ const ResearchAgentAnnotation = Annotation.Root({
     reducer: (_prev, next) => next,
     default: () => '',
   }),
+  analysisMode: Annotation<'simple' | 'detailed'>({
+    reducer: (_prev, next) => next,
+    default: () => 'detailed',
+  }),
   // Output
   finalOutput: Annotation<string>({
     reducer: (_prev, next) => next,

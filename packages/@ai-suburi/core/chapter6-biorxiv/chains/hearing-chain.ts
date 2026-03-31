@@ -33,7 +33,7 @@ export class HearingChain {
 
     return new Command({
       goto: nextNode,
-      update: { hearing, messages: message },
+      update: { hearing, messages: message, analysisMode: hearing.analysis_mode },
     });
   }
 

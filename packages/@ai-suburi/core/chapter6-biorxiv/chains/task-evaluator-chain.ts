@@ -40,19 +40,37 @@ export class TaskEvaluator {
       `retryCount=${currentRetryCount}/${this.maxRetryCount}, readingResults=${readingResults.length}件`,
     );
 
-    // 読み取り結果が0件の場合はリトライせず即レポート生成へ
+    // 読み取り結果が0件の場合: リトライ上限までは再検索を試みる
     if (readingResults.length === 0) {
+      currentRetryCount++;
+      if (currentRetryCount >= this.maxRetryCount) {
+        logger.info(
+          `読み取り結果が0件、リトライ上限（${this.maxRetryCount}回）に達したため、レポート生成に進みます`,
+        );
+        return new Command({
+          goto: 'generate_report',
+          update: {
+            retryCount: currentRetryCount,
+            evaluation: {
+              need_more_information: false,
+              reason: '読み取り結果が0件のため、取得済みの情報でレポートを生成します',
+              content: '',
+            },
+          },
+        });
+      }
       logger.info(
-        '読み取り結果が0件のため、現状の情報でレポート生成に進みます',
+        `読み取り結果が0件のため、別角度で再検索します（リトライ ${currentRetryCount}/${this.maxRetryCount}）`,
       );
       return new Command({
-        goto: 'generate_report',
+        goto: 'decompose_query',
         update: {
           retryCount: currentRetryCount,
           evaluation: {
-            need_more_information: false,
-            reason: '読み取り結果が0件のため、取得済みの情報でレポートを生成します',
-            content: '',
+            need_more_information: true,
+            reason: '関連論文が0件のため、別のアプローチで再検索が必要です',
+            content:
+              '前回の検索では関連論文が0件でした。より一般的な検索キーワードや異なるアプローチのサブタスクを生成してください。',
           },
         },
       });
