@@ -106,11 +106,9 @@ export class TrainingDataWriter {
   writeEntry(entry: TrainingEntry): number {
     let written = 0;
 
+    const goal = `${entry.paper.category}分野の研究動向を調査する`;
+
     for (const sq of entry.syntheticQueries) {
-      const goal =
-        sq.queryType === 'goal'
-          ? sq.query
-          : `${entry.paper.category}分野の研究動向を調査する`;
 
       const trainingLine: TrainingMessage = {
         messages: [

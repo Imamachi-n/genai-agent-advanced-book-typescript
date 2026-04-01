@@ -687,19 +687,73 @@ FT 済みモデルの推論コスト増はごくわずかです。たとえば g
 
 #### Step 2: ファインチューニングの実行
 
+##### 学習データの JSONL フォーマット
+
+OpenAI の SFT（Supervised Fine-Tuning）では、**JSONL（JSON Lines）形式** のファイルを学習データとして使用します。1 行に 1 つの学習例を記述し、各行は `messages` 配列を含む JSON オブジェクトです。
+
+**必須フォーマット:**
+
+```jsonl
+{"messages": [{"role": "system", "content": "..."}, {"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]}
+```
+
+**各フィールドの説明:**
+
+| フィールド | 必須 | 説明 |
+| --- | --- | --- |
+| `messages` | ✅ | ロール（system / user / assistant）とコンテンツのペア配列 |
+| `messages[].role` | ✅ | `system`（システムプロンプト）、`user`（ユーザー入力）、`assistant`（モデルが学習する理想の出力） |
+| `messages[].content` | ✅ | テキストまたは画像コンテンツ（音声・ファイルは非対応） |
+| `messages[].weight` | — | オプション。`0` を指定するとその assistant メッセージを学習対象から除外できる |
+
+**ルール・制約:**
+
+- 最低 **1 つの user メッセージ** と **1 つの assistant メッセージ** が必要
+- system メッセージはオプション（推論時と同じ system プロンプトを含めると効果的）
+- 最小学習データ数は **10 件**、推奨は **50〜100 件以上**、理想は **数百件**
+- 検証用データ（validation file）も同じフォーマットで別途用意可能（過学習の検知に有効）
+
+**このエージェントでの具体例:**
+
+前述の FT パイプラインで生成される学習データは、すでにこのフォーマットに準拠しています。
+
+```jsonl
+{"messages": [
+  {"role": "system", "content": "<EXPAND_QUERY_PROMPT のシステムプロンプト全文>"},
+  {"role": "user", "content": "目標: bioinformatics分野の研究動向を調査する\nクエリ: 糞便移植 ストレイン定着 バイオインフォマティクス ツール"},
+  {"role": "assistant", "content": "Strain-level engraftment tracing in fecal microbiota transplantation (FMT) using shotgun metagenomic sequencing with the PStrain-tracer tool..."}
+]}
+```
+
+ポイントは、**system プロンプトを推論時（`rag-searcher.ts` の `EXPAND_QUERY_PROMPT`）と完全一致させている** ことです。これにより、FT 済みモデルは推論時と同じコンテキストで動作し、学習した知識を最大限に発揮できます。
+
+:::caution 学習データの品質が FT の成否を決める
+
+OpenAI の公式ドキュメントでも強調されている通り、**データは量より質** が重要です。Meta の研究（LIMA, 2023）では、たった 1,000 件の高品質データで SFT した 65B モデルが、52,000 件で訓練したモデルを上回りました。前述の FT パイプラインの品質検証（`--validate`）で hitRate 70% 以上を確認してから学習に進むことをおすすめします。
+
+:::
+
+##### ファインチューニングジョブの実行
+
 OpenAI の Fine-tuning API を使ってモデルを学習させます。gpt-4.1-nano を使う場合の例を示します。
 
 ```bash
 # 学習データのアップロード
 openai api files.create -f training_data.jsonl -p fine-tune
 
+# （任意）検証データのアップロード
+openai api files.create -f validation_data.jsonl -p fine-tune
+
 # ファインチューニングジョブの作成（gpt-4.1-nano の例）
 openai api fine_tuning.jobs.create \
   -t file-xxxxxxxx \
   -m gpt-4.1-nano-2025-04-14
+
+# ジョブの進捗確認
+openai api fine_tuning.jobs.retrieve -i ftjob-xxxxxxxx
 ```
 
-学習は OpenAI のサーバー上で実行されるため、ローカル環境に GPU は不要です。学習データの件数にもよりますが、数百件程度であれば数十分〜数時間で完了します。
+学習は OpenAI のサーバー上で実行されるため、ローカル環境に GPU は不要です。学習データの件数にもよりますが、数百件程度であれば数十分〜数時間で完了します。完了すると `ft:gpt-4.1-nano-2025-04-14:your-org::xxxxxxxx` のようなモデル ID が発行されます。
 
 #### Step 3: ファインチューニング済みモデルへの切り替え
 

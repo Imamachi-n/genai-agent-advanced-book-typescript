@@ -20,12 +20,14 @@ const IDEAL_QUERY_PROMPT = `\
 
 ## ルール
 
-1. 論文の核心的なテーマを2〜3つのキーフレーズで表現すること
-2. タイトルをそのままコピーしないこと（ベクトル検索では意味的な類似性が重要）
-3. 論文で使われている主要な技術名・手法名を含めること
-4. 自然言語の文として生成すること（キーワードの羅列ではなく）
+1. 出力は必ず15語以内の簡潔な英語クエリにすること（論文の要約文ではなく検索クエリ）
+2. 論文の核心的なテーマを2〜3つのキーフレーズで表現すること
+3. タイトルをそのままコピーしないこと（ベクトル検索では意味的な類似性が重要）
+4. 論文で使われている主要な技術名・手法名・ツール名を含めること
 5. 略語を使う場合は正式名称も併記すること（例: APA (Alternative Polyadenylation)）
-6. 検索クエリのみを出力し、説明は含めないこと`;
+6. 検索クエリのみを出力し、説明や結果の記述は含めないこと
+7. NG例: "Using shotgun metagenomic sequencing, this study introduces PStrain-tracer, a framework to track..."（長すぎ・論文要約）
+8. OK例: "strain-level engraftment tracing FMT shotgun metagenomics PStrain-tracer"（簡潔・検索向き）`;
 
 const MIN_COSINE_SIMILARITY = 0.6;
 const MAX_RETRIES = 3;

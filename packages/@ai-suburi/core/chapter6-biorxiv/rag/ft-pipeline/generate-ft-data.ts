@@ -53,7 +53,7 @@ function deleteProgress(outputDir: string): void {
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   let outputDir = DEFAULT_OUTPUT_DIR;
-  let queriesPerPaper = 5;
+  let queriesPerPaper = 3;
   let limit: number | undefined;
   let validate = false;
   let validateOnly: string | undefined;
