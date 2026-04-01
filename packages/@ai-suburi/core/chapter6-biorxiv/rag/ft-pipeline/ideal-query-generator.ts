@@ -8,6 +8,11 @@ import type { BiorxivPaper } from '../../models.js';
 
 const logger = setupLogger('ideal-query-generator');
 
+/** LangChain テンプレートの変数展開を防ぐために波括弧をエスケープする */
+function escapeBraces(text: string): string {
+  return text.replace(/\{/g, '{{').replace(/\}/g, '}}');
+}
+
 const IDEAL_QUERY_PROMPT = `\
 あなたは、bioRxiv論文のベクトル検索に最適な英語検索クエリを生成する専門家です。
 
@@ -45,20 +50,35 @@ function cosineSimilarity(a: number[], b: number[]): number {
 }
 
 /**
- * IdealQueryGenerator のファクトリ。OpenAI クライアントを使い回すために
- * createIdealQueryGenerator() でインスタンスを生成する。
+ * IdealQueryGenerator のファクトリ。
+ * skipEmbeddingCheck=true で Embedding 品質検証をスキップし高速化できる。
  */
 export function createIdealQueryGenerator(
   llm: ChatOpenAI,
   openaiApiKey: string,
-  embeddingModel: string = 'text-embedding-3-small',
+  options: {
+    embeddingModel?: string;
+    skipEmbeddingCheck?: boolean;
+  } = {},
 ): (paper: BiorxivPaper) => Promise<string> {
-  const openai = new OpenAI({ apiKey: openaiApiKey });
+  const embeddingModel = options.embeddingModel ?? 'text-embedding-3-small';
+  const skipCheck = options.skipEmbeddingCheck ?? false;
+  const openai = skipCheck ? null : new OpenAI({ apiKey: openaiApiKey });
   const prompt = ChatPromptTemplate.fromTemplate(IDEAL_QUERY_PROMPT);
   const chain = prompt.pipe(llm).pipe(new StringOutputParser());
 
   return async (paper: BiorxivPaper): Promise<string> => {
-    // 論文の Embedding を事前計算
+    // スキップモード: LLM 1 回コールのみ（Embedding 検証なし）
+    if (skipCheck || !openai) {
+      const query = await chain.invoke({
+        title: escapeBraces(paper.title),
+        abstract: escapeBraces(paper.abstract),
+      });
+      logger.info(`Generated (no validation): "${query.slice(0, 80)}..."`);
+      return query;
+    }
+
+    // 検証モード: Embedding コサイン類似度チェック付き
     const paperText = `${paper.title}\n\n${paper.abstract}`;
     const paperEmbedding = await openai.embeddings.create({
       model: embeddingModel,
@@ -70,11 +90,10 @@ export function createIdealQueryGenerator(
 
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
       lastQuery = await chain.invoke({
-        title: paper.title,
-        abstract: paper.abstract,
+        title: escapeBraces(paper.title),
+        abstract: escapeBraces(paper.abstract),
       });
 
-      // クエリの Embedding を計算してコサイン類似度を検証
       const queryEmbedding = await openai.embeddings.create({
         model: embeddingModel,
         input: lastQuery,
@@ -91,7 +110,6 @@ export function createIdealQueryGenerator(
       }
     }
 
-    // 最大リトライ到達：最後に生成したクエリを返す
     logger.warn(
       `Max retries reached for "${paper.title.slice(0, 60)}...". Using last generated query.`,
     );

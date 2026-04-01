@@ -7,6 +7,11 @@ import type { BiorxivPaper } from '../../models.js';
 
 const logger = setupLogger('query-synthesizer');
 
+/** LangChain テンプレートの変数展開を防ぐために波括弧をエスケープする */
+function escapeBraces(text: string): string {
+  return text.replace(/\{/g, '{{').replace(/\}/g, '}}');
+}
+
 export interface SyntheticQuery {
   query: string;
   language: 'ja';
@@ -75,8 +80,8 @@ export async function synthesizeUserQueries(
   );
 
   const result = await chain.invoke({
-    title: paper.title,
-    abstract: paper.abstract,
+    title: escapeBraces(paper.title),
+    abstract: escapeBraces(paper.abstract),
     category: paper.category,
     queries_per_paper: queriesPerPaper,
   });

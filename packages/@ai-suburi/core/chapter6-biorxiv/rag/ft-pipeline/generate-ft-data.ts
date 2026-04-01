@@ -3,17 +3,23 @@ import * as path from 'node:path';
 import { ChatOpenAI } from '@langchain/openai';
 import { loadSettings } from '../../configs.js';
 import { setupLogger } from '../../custom-logger.js';
+import type { BiorxivPaper } from '../../models.js';
 import { QdrantStore } from '../qdrant-store.js';
 import { extractAllPapers } from './paper-extractor.js';
 import { createIdealQueryGenerator } from './ideal-query-generator.js';
 import { synthesizeUserQueries } from './query-synthesizer.js';
-import { TrainingDataWriter } from './training-data-formatter.js';
+import {
+  type TrainingEntry,
+  TrainingDataWriter,
+} from './training-data-formatter.js';
 import { validateTrainingData } from './validation.js';
 
 const logger = setupLogger('generate-ft-data');
 
 const DEFAULT_OUTPUT_DIR = 'storage/ft-training-data';
 const DEFAULT_MODEL = 'gpt-5-nano';
+const MAX_RETRY_COUNT = 3;
+const RATE_LIMIT_WAIT_MS = 30000;
 
 /** temperature=0 をサポートしないモデル一覧。これらは temperature を指定しない */
 const TEMPERATURE_FIXED_MODELS = new Set(['gpt-5-nano', 'gpt-5-mini']);
@@ -48,6 +54,45 @@ function deleteProgress(outputDir: string): void {
   }
 }
 
+// --- リトライ付き処理 ---
+
+function isRateLimitError(error: unknown): boolean {
+  const msg = (error as Error)?.message ?? String(error);
+  return msg.includes('429') || msg.includes('rate') || msg.includes('Rate');
+}
+
+/**
+ * 1 論文の処理をリトライ付きで実行する。
+ * レート制限エラー時はエクスポネンシャルバックオフでリトライする。
+ */
+async function processPaperWithRetry(
+  paper: BiorxivPaper,
+  llm: ChatOpenAI,
+  generateIdealQuery: (paper: BiorxivPaper) => Promise<string>,
+  queriesPerPaper: number,
+): Promise<TrainingEntry> {
+  for (let attempt = 0; attempt < MAX_RETRY_COUNT; attempt++) {
+    try {
+      const [syntheticQueries, idealQuery] = await Promise.all([
+        synthesizeUserQueries(llm, paper, queriesPerPaper),
+        generateIdealQuery(paper),
+      ]);
+      return { paper, syntheticQueries, idealQuery };
+    } catch (error) {
+      if (isRateLimitError(error) && attempt < MAX_RETRY_COUNT - 1) {
+        const waitMs = RATE_LIMIT_WAIT_MS * (attempt + 1);
+        logger.info(
+          `Rate limit for "${paper.title.slice(0, 40)}..." - retry ${attempt + 1}/${MAX_RETRY_COUNT} in ${waitMs / 1000}s`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw new Error(`Max retries exceeded for "${paper.title.slice(0, 60)}..."`);
+}
+
 // --- メイン ---
 
 async function main(): Promise<void> {
@@ -60,6 +105,8 @@ async function main(): Promise<void> {
   let sampleSize = 50;
   let model = DEFAULT_MODEL;
   let resume = false;
+  let skipEmbeddingCheck = true;
+  let concurrency = 5;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--output' && args[i + 1]) {
@@ -84,6 +131,11 @@ async function main(): Promise<void> {
       i++;
     } else if (args[i] === '--resume') {
       resume = true;
+    } else if (args[i] === '--embedding-check') {
+      skipEmbeddingCheck = false;
+    } else if (args[i] === '--concurrency' && args[i + 1]) {
+      concurrency = Number.parseInt(args[i + 1]!, 10);
+      i++;
     }
   }
 
@@ -143,6 +195,7 @@ async function main(): Promise<void> {
   // Step 2〜4: 合成クエリ + 理想クエリ生成 → JSONL にストリーミング書き出し
   const useFixedTemp = TEMPERATURE_FIXED_MODELS.has(model);
   logger.info(`Using model: ${model}${useFixedTemp ? ' (temperature fixed by API)' : ' (temperature=0)'}`);
+  logger.info(`Concurrency: ${concurrency}, Embedding check: ${skipEmbeddingCheck ? 'skip' : 'enabled'}`);
   const llm = new ChatOpenAI({
     model,
     ...(useFixedTemp ? {} : { temperature: 0 }),
@@ -150,53 +203,41 @@ async function main(): Promise<void> {
   const generateIdealQuery = createIdealQueryGenerator(
     llm,
     settings.openaiApiKey,
-    settings.embeddingModel,
+    { embeddingModel: settings.embeddingModel, skipEmbeddingCheck },
   );
 
   // ストリーミング Writer（レジューム時は append モード）
   const writer = new TrainingDataWriter(outputDir, { append: resume && processedDois.size > 0 });
   let failedCount = 0;
 
-  for (let i = 0; i < remainingPapers.length; i++) {
-    const paper = remainingPapers[i]!;
+  // バッチ並列処理（レート制限時はリトライ）
+  for (let batchStart = 0; batchStart < remainingPapers.length; batchStart += concurrency) {
+    const batch = remainingPapers.slice(batchStart, batchStart + concurrency);
     logger.info(
-      `Processing paper ${i + 1}/${remainingPapers.length}: ${paper.title.slice(0, 60)}...`,
+      `Processing batch ${Math.floor(batchStart / concurrency) + 1} (papers ${batchStart + 1}-${batchStart + batch.length}/${remainingPapers.length})`,
     );
 
-    try {
-      // Step 2: 合成クエリ生成
-      const syntheticQueries = await synthesizeUserQueries(
-        llm,
-        paper,
-        queriesPerPaper,
-      );
+    const results = await Promise.allSettled(
+      batch.map((paper) => processPaperWithRetry(paper, llm, generateIdealQuery, queriesPerPaper)),
+    );
 
-      // Step 3: 理想クエリ生成
-      const idealQuery = await generateIdealQuery(paper);
-
-      // Step 4: JSONL に即座に書き出し（メモリに溜めない）
-      writer.writeEntry({ paper, syntheticQueries, idealQuery });
-      processedDois.add(paper.doi);
-
-      // 1 件ごとにプログレス保存（LLM API コールに比べて writeFileSync のコストは無視できる）
-      saveProgress({
-        processedDois: [...processedDois],
-        model,
-        outputDir,
-      });
-    } catch (error) {
-      failedCount++;
-      logger.warn(
-        `Failed to process paper "${paper.title.slice(0, 60)}...": ${(error as Error).message}`,
-      );
-
-      // レート制限エラーの場合は少し待つ
-      const errorMessage = (error as Error).message ?? '';
-      if (errorMessage.includes('429') || errorMessage.includes('rate')) {
-        logger.info('Rate limit detected. Waiting 30 seconds...');
-        await new Promise((resolve) => setTimeout(resolve, 30000));
+    // 結果をストリーミング書き出し（書き込みは逐次で安全に）
+    for (const result of results) {
+      if (result.status === 'fulfilled') {
+        writer.writeEntry(result.value);
+        processedDois.add(result.value.paper.doi);
+      } else {
+        failedCount++;
+        logger.warn(`Failed after ${MAX_RETRY_COUNT} retries: ${result.reason?.message ?? String(result.reason)}`);
       }
     }
+
+    // バッチごとにプログレス保存
+    saveProgress({
+      processedDois: [...processedDois],
+      model,
+      outputDir,
+    });
   }
 
   // ストリームを閉じる
@@ -249,6 +290,12 @@ main().catch((error) => {
   );
   console.error(
     '  --resume                 前回の中断地点から再開',
+  );
+  console.error(
+    '  --embedding-check        Embedding品質検証を有効化（デフォルト: スキップ）',
+  );
+  console.error(
+    '  --concurrency <n>        バッチ並列数（default: 5）',
   );
   console.error(
     '  --validate               生成後に品質検証を実行',

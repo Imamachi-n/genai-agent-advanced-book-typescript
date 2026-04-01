@@ -139,7 +139,7 @@ npx tsx chapter6-biorxiv/agent/research-agent.ts "CRISPR スクリーニング�
 クエリ拡張モデルのファインチューニング用学習データを自動生成する。Qdrant に格納済みの論文データから、合成ユーザークエリ＋理想検索クエリのペアを作成する。
 
 ```bash
-# テスト実行（10論文分 + 品質検証、デフォルトモデル: gpt-5-nano）
+# テスト実行（10 論文分 + 品質検証、デフォルト: gpt-5-nano・5 並列・Embedding 検証スキップ）
 npx tsx chapter6-biorxiv/rag/ft-pipeline/generate-ft-data.ts --limit 10 --validate
 
 # 本番データ生成（全論文対象）
@@ -150,14 +150,37 @@ npx tsx chapter6-biorxiv/rag/ft-pipeline/generate-ft-data.ts --model gpt-5-nano 
 npx tsx chapter6-biorxiv/rag/ft-pipeline/generate-ft-data.ts --model gpt-4.1-nano    # 安価（~$5/1.8万件）
 npx tsx chapter6-biorxiv/rag/ft-pipeline/generate-ft-data.ts --model gpt-5.4-nano    # バランス（~$17/1.8万件）
 
+# 並列数を調整（デフォルト: 5、レート制限が頻発する場合は下げる）
+npx tsx chapter6-biorxiv/rag/ft-pipeline/generate-ft-data.ts --concurrency 3
+
+# Embedding 品質検証を有効化（デフォルト: スキップ。品質重視の場合に使用）
+npx tsx chapter6-biorxiv/rag/ft-pipeline/generate-ft-data.ts --embedding-check
+
 # 中断した場合は --resume で前回の続きから再開
 npx tsx chapter6-biorxiv/rag/ft-pipeline/generate-ft-data.ts --resume
 
-# 論文あたりのクエリ数を変更（デフォルト: 5）
-npx tsx chapter6-biorxiv/rag/ft-pipeline/generate-ft-data.ts --queries-per-paper 3
-
 # 既存データの品質検証のみ
 npx tsx chapter6-biorxiv/rag/ft-pipeline/generate-ft-data.ts --validate-only storage/ft-training-data/training_2026-04-01.jsonl
+```
+
+**実行結果の例:**
+
+```text
+[generate-ft-data] Step 1: Extracting papers from Qdrant...
+[paper-extractor] Total papers extracted: 18234
+[generate-ft-data] Using model: gpt-5-nano (temperature fixed by API)
+[generate-ft-data] Concurrency: 5, Embedding check: skip
+[generate-ft-data] Processing batch 1 (papers 1-5/18234)
+[ideal-query-generator] Generated (no validation): "CycSim context-aware simulator Bayesian optimization long-read..."
+[query-synthesizer] Generated 3 synthetic queries for: Context-aware simulation enables sys...
+[generate-ft-data] Processing batch 2 (papers 6-10/18234)
+...
+[training-data-formatter] Written 54702 training examples to storage/ft-training-data/training_2026-04-02.jsonl
+
+Done! Generated 54702 training examples.
+  Training data: storage/ft-training-data/training_2026-04-02.jsonl
+  Metadata: storage/ft-training-data/training_2026-04-02_metadata.jsonl
+  Processed: 18234, Failed: 0
 ```
 
 **出力ファイル:**
@@ -168,16 +191,23 @@ npx tsx chapter6-biorxiv/rag/ft-pipeline/generate-ft-data.ts --validate-only sto
 **パイプラインの流れ:**
 
 1. Qdrant から全論文を抽出（scroll API）
-2. 論文ごとに LLM で 5 種の合成クエリを生成（日英混在）
-3. 論文ごとに理想の英語検索クエリを生成（Embedding 品質検証付き）
-4. OpenAI FT 形式の JSONL に整形
+2. 論文ごとに LLM で日本語 3 種の合成クエリを生成（キーワード / 質問 / タスク記述）
+3. 論文ごとに理想の英語検索クエリを生成（15 語以内）
+4. OpenAI FT 形式の JSONL にストリーミング書き出し
 5. 品質検証（理想クエリで Qdrant 検索 → 対象論文ヒット率を測定）
+
+**高速化オプション:**
+
+| オプション | デフォルト | 説明 |
+| --- | --- | --- |
+| `--concurrency <n>` | 5 | バッチ並列数。合成クエリ+理想クエリも論文内で並列生成 |
+| `--embedding-check` | スキップ | 有効にすると理想クエリの Embedding 品質検証を実施（低速） |
 
 **エラーハンドリング:**
 
-- 10 件ごとにプログレスを自動保存。中断時は `--resume` で再開可能
-- OpenAI API のレート制限（429）を検知した場合は自動で 30 秒待機
-- 個別の論文でエラーが発生してもスキップして処理を継続
+- バッチごとにプログレスを自動保存。中断時は `--resume` で再開可能
+- レート制限（429）検知時はエクスポネンシャルバックオフで最大 3 回リトライ（30s → 60s → 90s）
+- 3 回リトライしても失敗した論文はスキップして処理を継続
 
 ### Step 5: LangGraph Studio で実行
 
