@@ -65,33 +65,48 @@ const SYSTEM_PROMPT = `<system>
 REMEMBER: rulesタグの内容に必ず従うこと`;
 
 /**
- * TrainingEntry の配列を OpenAI FT 用 JSONL + メタデータ JSONL に書き出す。
+ * JSONL ストリーミング Writer。1 エントリずつ追記できる。
  */
-export async function formatTrainingData(options: {
-  entries: TrainingEntry[];
-  outputDir: string;
-}): Promise<{ trainingPath: string; metadataPath: string; totalExamples: number }> {
-  const { entries, outputDir } = options;
-  fs.mkdirSync(outputDir, { recursive: true });
+export class TrainingDataWriter {
+  readonly trainingPath: string;
+  readonly metadataPath: string;
+  private trainingStream: fs.WriteStream;
+  private metadataStream: fs.WriteStream;
+  private lineIndex = 0;
 
-  const timestamp = new Date().toISOString().split('T')[0]!;
-  const trainingPath = path.join(outputDir, `training_${timestamp}.jsonl`);
-  const metadataPath = path.join(outputDir, `training_${timestamp}_metadata.jsonl`);
+  constructor(outputDir: string, options?: { append?: boolean }) {
+    fs.mkdirSync(outputDir, { recursive: true });
 
-  const trainingStream = fs.createWriteStream(trainingPath, {
-    flags: 'w',
-    encoding: 'utf-8',
-  });
-  const metadataStream = fs.createWriteStream(metadataPath, {
-    flags: 'w',
-    encoding: 'utf-8',
-  });
+    const timestamp = new Date().toISOString().split('T')[0]!;
+    this.trainingPath = path.join(outputDir, `training_${timestamp}.jsonl`);
+    this.metadataPath = path.join(
+      outputDir,
+      `training_${timestamp}_metadata.jsonl`,
+    );
 
-  let lineIndex = 0;
+    const flags = options?.append ? 'a' : 'w';
+    this.trainingStream = fs.createWriteStream(this.trainingPath, {
+      flags,
+      encoding: 'utf-8',
+    });
+    this.metadataStream = fs.createWriteStream(this.metadataPath, {
+      flags,
+      encoding: 'utf-8',
+    });
 
-  for (const entry of entries) {
+    // append モードの場合、既存行数を数える
+    if (options?.append && fs.existsSync(this.trainingPath)) {
+      const content = fs.readFileSync(this.trainingPath, 'utf-8');
+      this.lineIndex = content.split('\n').filter((l) => l.trim()).length;
+      logger.info(`Appending to existing file (${this.lineIndex} lines)`);
+    }
+  }
+
+  /** 1 エントリ分（論文 × N クエリ）を JSONL に追記する */
+  writeEntry(entry: TrainingEntry): number {
+    let written = 0;
+
     for (const sq of entry.syntheticQueries) {
-      // ゴール記述型クエリの場合はゴール部分にも使う
       const goal =
         sq.queryType === 'goal'
           ? sq.query
@@ -109,33 +124,39 @@ export async function formatTrainingData(options: {
       };
 
       const metadataLine: MetadataEntry = {
-        lineIndex,
+        lineIndex: this.lineIndex,
         doi: entry.paper.doi,
         queryType: sq.queryType,
         language: sq.language,
       };
 
-      trainingStream.write(`${JSON.stringify(trainingLine)}\n`);
-      metadataStream.write(`${JSON.stringify(metadataLine)}\n`);
-      lineIndex++;
+      this.trainingStream.write(`${JSON.stringify(trainingLine)}\n`);
+      this.metadataStream.write(`${JSON.stringify(metadataLine)}\n`);
+      this.lineIndex++;
+      written++;
     }
+
+    return written;
   }
 
-  await Promise.all([
-    new Promise<void>((resolve, reject) => {
-      trainingStream.end(() => resolve());
-      trainingStream.on('error', reject);
-    }),
-    new Promise<void>((resolve, reject) => {
-      metadataStream.end(() => resolve());
-      metadataStream.on('error', reject);
-    }),
-  ]);
+  /** ストリームを閉じて書き込みを完了する */
+  async close(): Promise<{ totalExamples: number }> {
+    await Promise.all([
+      new Promise<void>((resolve, reject) => {
+        this.trainingStream.end(() => resolve());
+        this.trainingStream.on('error', reject);
+      }),
+      new Promise<void>((resolve, reject) => {
+        this.metadataStream.end(() => resolve());
+        this.metadataStream.on('error', reject);
+      }),
+    ]);
 
-  logger.info(
-    `Written ${lineIndex} training examples to ${trainingPath}`,
-  );
-  logger.info(`Written metadata to ${metadataPath}`);
+    logger.info(
+      `Written ${this.lineIndex} training examples to ${this.trainingPath}`,
+    );
+    logger.info(`Written metadata to ${this.metadataPath}`);
 
-  return { trainingPath, metadataPath, totalExamples: lineIndex };
+    return { totalExamples: this.lineIndex };
+  }
 }

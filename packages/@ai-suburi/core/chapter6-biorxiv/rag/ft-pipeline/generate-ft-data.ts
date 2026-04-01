@@ -7,10 +7,7 @@ import { QdrantStore } from '../qdrant-store.js';
 import { extractAllPapers } from './paper-extractor.js';
 import { createIdealQueryGenerator } from './ideal-query-generator.js';
 import { synthesizeUserQueries } from './query-synthesizer.js';
-import {
-  type TrainingEntry,
-  formatTrainingData,
-} from './training-data-formatter.js';
+import { TrainingDataWriter } from './training-data-formatter.js';
 import { validateTrainingData } from './validation.js';
 
 const logger = setupLogger('generate-ft-data');
@@ -143,7 +140,7 @@ async function main(): Promise<void> {
     `Total: ${papers.length} papers, remaining: ${remainingPapers.length}`,
   );
 
-  // Step 2 & 3: 合成クエリ + 理想クエリ生成（ストリーミング書き出し）
+  // Step 2〜4: 合成クエリ + 理想クエリ生成 → JSONL にストリーミング書き出し
   const useFixedTemp = TEMPERATURE_FIXED_MODELS.has(model);
   logger.info(`Using model: ${model}${useFixedTemp ? ' (temperature fixed by API)' : ' (temperature=0)'}`);
   const llm = new ChatOpenAI({
@@ -156,7 +153,8 @@ async function main(): Promise<void> {
     settings.embeddingModel,
   );
 
-  const entries: TrainingEntry[] = [];
+  // ストリーミング Writer（レジューム時は append モード）
+  const writer = new TrainingDataWriter(outputDir, { append: resume && processedDois.size > 0 });
   let failedCount = 0;
 
   for (let i = 0; i < remainingPapers.length; i++) {
@@ -176,20 +174,16 @@ async function main(): Promise<void> {
       // Step 3: 理想クエリ生成
       const idealQuery = await generateIdealQuery(paper);
 
-      entries.push({ paper, syntheticQueries, idealQuery });
+      // Step 4: JSONL に即座に書き出し（メモリに溜めない）
+      writer.writeEntry({ paper, syntheticQueries, idealQuery });
       processedDois.add(paper.doi);
 
-      // 10 件ごとにプログレス保存
-      if ((i + 1) % 10 === 0) {
-        saveProgress({
-          processedDois: [...processedDois],
-          model,
-          outputDir,
-        });
-        logger.info(
-          `Progress saved: ${processedDois.size} papers processed, ${failedCount} failed`,
-        );
-      }
+      // 1 件ごとにプログレス保存（LLM API コールに比べて writeFileSync のコストは無視できる）
+      saveProgress({
+        processedDois: [...processedDois],
+        model,
+        outputDir,
+      });
     } catch (error) {
       failedCount++;
       logger.warn(
@@ -205,17 +199,13 @@ async function main(): Promise<void> {
     }
   }
 
-  // Step 4: JSONL 整形
-  logger.info('Step 4: Formatting training data...');
-  const { trainingPath, metadataPath, totalExamples } =
-    await formatTrainingData({
-      entries,
-      outputDir,
-    });
+  // ストリームを閉じる
+  const { totalExamples } = await writer.close();
 
   // 正常完了: プログレスファイルを削除
   deleteProgress(outputDir);
 
+  const { trainingPath, metadataPath } = writer;
   console.log(`\nDone! Generated ${totalExamples} training examples.`);
   console.log(`  Training data: ${trainingPath}`);
   console.log(`  Metadata: ${metadataPath}`);
