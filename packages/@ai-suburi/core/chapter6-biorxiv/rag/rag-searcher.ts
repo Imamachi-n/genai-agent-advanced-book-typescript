@@ -32,6 +32,10 @@ const EXPAND_QUERY_PROMPT = `\
 3. バイオインフォマティクスの専門用語を適切に使用すること
 4. 自然言語の文として生成すること（ベクトル検索に最適）
 5. 説明や理由付けは含めず、純粋な検索クエリのみを出力すること
+6. バイオインフォマティクス特有の表記揺れを考慮すること:
+   - 略語と正式名称の両方を含める（例: APA / Alternative Polyadenylation）
+   - ハイフン有無の揺れを考慮する（例: single-cell / single cell）
+   - 技術名とその応用分野を組み合わせる（例: "machine learning" + "genomic variant"）
 </rules>
 
 ## 入力フォーマット
@@ -56,7 +60,7 @@ function cosineSimilarity(a: number[], b: number[]): number {
 }
 
 export class RagSearcher implements Searcher {
-  static readonly RELEVANCE_SCORE_THRESHOLD = 0.3;
+  static readonly RELEVANCE_SCORE_THRESHOLD = 0.25;
 
   private llm: ChatOpenAI;
   private store: QdrantStore;
@@ -169,7 +173,7 @@ export class RagSearcher implements Searcher {
       retryCount++;
       if (retryCount < this.maxRetries) {
         feedback =
-          '検索結果が0件または関連度が低い結果のみでした。より一般的なキーワードや別の関連用語で検索してください。';
+          `前回のクエリ "${expandedQuery}" では関連度の高い論文が見つかりませんでした。以下の戦略で別のクエリを生成してください:\n1. より上位の概念カテゴリで検索する（例: 特定の手法名 → その手法が属する分野名）\n2. 同義語や別の表記法を使用する（例: scRNA-seq → single-cell transcriptomics）\n3. 関連する生物学的プロセスやパスウェイ名で検索する`;
         logger.info(
           `Retrying with adjusted query. Attempt ${retryCount}/${this.maxRetries}`,
         );
