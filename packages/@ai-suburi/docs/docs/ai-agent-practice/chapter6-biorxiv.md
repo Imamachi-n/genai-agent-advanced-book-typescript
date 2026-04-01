@@ -569,6 +569,82 @@ flowchart TD
 
 OpenAI のファインチューニングには最低でも **10 件** の学習データが必要ですが、実用的な精度向上には **50〜100 件** 以上、理想的には **数百件** を用意することが推奨されています。上記の半自動化パイプラインを活用すれば、この規模のデータ収集も現実的です。
 
+##### 具体例: FT 学習データ生成パイプライン
+
+この応用編では、上記の半自動化パイプラインを実際に実装しています。`rag/ft-pipeline/` ディレクトリに、Qdrant に格納済みの論文データから FT 用学習データを自動生成するパイプラインが用意されています。
+
+```mermaid
+flowchart LR
+    Q["Qdrant<br/>全論文抽出"] --> SQ["合成クエリ生成<br/>（日英 5 種 × LLM）"]
+    SQ --> IQ["理想クエリ生成<br/>（Embedding 検証付き）"]
+    IQ --> FMT["JSONL 整形<br/>（OpenAI FT 形式）"]
+    FMT --> VAL["品質検証<br/>（Qdrant ヒット率）"]
+
+    style Q fill:#e3f2fd
+    style SQ fill:#fff3e0
+    style IQ fill:#fff3e0
+    style FMT fill:#e8f5e9
+    style VAL fill:#f3e5f5
+```
+
+**パイプラインの各ステップ:**
+
+1. **論文抽出**: Qdrant の scroll API で全論文（タイトル + アブストラクト）を取得
+2. **合成クエリ生成**: 論文ごとに LLM で 5 種類の多様なクエリを生成（日本語キーワード / 日本語質問 / 英語キーワード / 英語タスク記述 / ゴール記述）
+3. **理想クエリ生成**: 論文の内容からベクトル検索に最適な英語クエリを生成し、Embedding のコサイン類似度が 0.6 以上であることを検証
+4. **JSONL 整形**: `EXPAND_QUERY_PROMPT` と同一の system プロンプト + 合成クエリ（user） + 理想クエリ（assistant）の形式で出力
+5. **品質検証**: 理想クエリで Qdrant を検索し、対象論文が上位にヒットするか（hitRate）を測定
+
+**実行方法:**
+
+```bash
+# まずテスト（10 論文分 + 品質検証、デフォルトモデル: gpt-5-nano）
+pnpm tsx chapter6-biorxiv/rag/ft-pipeline/generate-ft-data.ts --limit 10 --validate
+
+# モデルを変更する場合（コストと品質のトレードオフ）
+pnpm tsx chapter6-biorxiv/rag/ft-pipeline/generate-ft-data.ts --model gpt-4.1-nano --limit 10
+
+# 本番データ生成（全論文対象）
+pnpm tsx chapter6-biorxiv/rag/ft-pipeline/generate-ft-data.ts
+
+# 中断した場合は --resume で再開
+pnpm tsx chapter6-biorxiv/rag/ft-pipeline/generate-ft-data.ts --resume
+```
+
+**生成される学習データの例:**
+
+以下は、ある論文（CycSim: long-read mapping parameter optimization）から生成された学習データの 1 行です。
+
+```jsonl
+{"messages": [
+  {"role": "system", "content": "<EXPAND_QUERY_PROMPT のシステムプロンプト>"},
+  {"role": "user", "content": "目標: bioinformatics分野の研究動向を調査する\nクエリ: 長鎖リード マッピング パラメータ最適化 コンテキスト感知型 シミュレーション CycSim"},
+  {"role": "assistant", "content": "Context-aware simulation with sequence-context-dependent error modeling (via CycSim) and Bayesian optimization for systematic long-read mapping parameter tuning to improve mapping efficiency and structural variant calling across Oxford Nanopore Technologies (ONT), PacBio HiFi reads, and Cyclone data."}
+]}
+```
+
+この例では、日本語のキーワードクエリ（user）に対して、論文の核心を捉えた英語の検索クエリ（assistant）が理想的な出力として学習されます。同じ論文から日本語質問型・英語キーワード型・英語タスク記述型・ゴール記述型の合計 5 パターンが生成されるため、1 論文あたり 5 件の学習データになります。
+
+**コスト目安（1.8 万件の論文を処理する場合）:**
+
+| モデル | 推定コスト | 品質 |
+| --- | --- | --- |
+| gpt-5-nano（デフォルト） | ~$3.5（約 500 円） | ⭐⭐ |
+| gpt-4.1-nano | ~$5（約 750 円） | ⭐⭐⭐ |
+| gpt-5.4-nano | ~$17（約 2,500 円） | ⭐⭐⭐⭐ |
+
+**品質検証レポートの例:**
+
+```text
+=== Validation Report ===
+  Total sampled: 50
+  Found in top 3: 38 (76.0%)
+  Found in top 10: 45 (90.0%)
+  Avg relevance score: 0.652
+```
+
+hitRate（top 10 ヒット率）が 70% 以上であれば、学習データとして十分な品質です。
+
 :::tip LangSmith によるログ収集の効率化
 
 [LangSmith](https://smith.langchain.com/) を導入すると、エージェントの各 LLM 呼び出しの入出力が自動的にトレースされます。上記の ① ログ収集フェーズで、手動でログを拾う代わりに LangSmith のトレースデータをエクスポートして加工できます。LangChain / LangGraph を使用しているこのエージェントとは特に相性が良く、環境変数の設定だけでトレースを有効化できます。
