@@ -156,6 +156,15 @@ npx tsx chapter6-biorxiv/rag/ft-pipeline/generate-ft-data.ts --concurrency 3
 # Embedding 品質検証を有効化（デフォルト: スキップ。品質重視の場合に使用）
 npx tsx chapter6-biorxiv/rag/ft-pipeline/generate-ft-data.ts --embedding-check
 
+# 特定キーワードに関連する論文だけで学習データを作成（FT テスト用）
+npx tsx chapter6-biorxiv/rag/ft-pipeline/generate-ft-data.ts \
+  --query "generative AI genomics" \
+  --query "Alternative Polyadenylation APA"
+
+# キーワード検索のヒット数を増やす（デフォルト: 100 件/キーワード）
+npx tsx chapter6-biorxiv/rag/ft-pipeline/generate-ft-data.ts \
+  --query "single-cell RNA-seq" --top-k 200
+
 # 中断した場合は --resume で前回の続きから再開
 npx tsx chapter6-biorxiv/rag/ft-pipeline/generate-ft-data.ts --resume
 
@@ -163,10 +172,30 @@ npx tsx chapter6-biorxiv/rag/ft-pipeline/generate-ft-data.ts --resume
 npx tsx chapter6-biorxiv/rag/ft-pipeline/generate-ft-data.ts --validate-only storage/ft-training-data/training_2026-04-01.jsonl
 ```
 
-**実行結果の例:**
+**実行結果の例（--query 指定時）:**
 
 ```text
-[generate-ft-data] Step 1: Extracting papers from Qdrant...
+[generate-ft-data] Step 1: Searching papers by queries: generative AI genomics, Alternative Polyadenylation APA
+[paper-extractor] Searching for: "generative AI genomics" (top 100)
+[paper-extractor] Found 100 papers, unique so far: 100
+[paper-extractor] Searching for: "Alternative Polyadenylation APA" (top 100)
+[paper-extractor] Found 100 papers, unique so far: 187
+[paper-extractor] Total unique papers for queries: 187
+[generate-ft-data] Using model: gpt-5-nano (temperature fixed by API)
+[generate-ft-data] Concurrency: 5, Embedding check: skip
+[generate-ft-data] Processing batch 1 (papers 1-5/187)
+...
+
+Done! Generated 561 training examples.
+  Training data: storage/ft-training-data/training_2026-04-02.jsonl
+  Metadata: storage/ft-training-data/training_2026-04-02_metadata.jsonl
+  Processed: 187, Failed: 0
+```
+
+**実行結果の例（全件）:**
+
+```text
+[generate-ft-data] Step 1: Extracting all papers from Qdrant...
 [paper-extractor] Total papers extracted: 18234
 [generate-ft-data] Using model: gpt-5-nano (temperature fixed by API)
 [generate-ft-data] Concurrency: 5, Embedding check: skip

@@ -1,6 +1,7 @@
 import { QdrantClient } from '@qdrant/js-client-rest';
 import { setupLogger } from '../../custom-logger.js';
 import type { BiorxivPaper } from '../../models.js';
+import { QdrantStore } from '../qdrant-store.js';
 
 const logger = setupLogger('paper-extractor');
 
@@ -54,4 +55,42 @@ export async function extractAllPapers(options: {
 
   logger.info(`Total papers extracted: ${papers.length}`);
   return papers;
+}
+
+/**
+ * キーワードリストで Qdrant をベクトル検索し、関連論文だけを抽出する。
+ * 複数キーワードの場合は各キーワードで検索して結果を DOI で重複排除して統合する。
+ */
+export async function extractPapersByQueries(options: {
+  queries: string[];
+  collectionName: string;
+  openaiApiKey: string;
+  embeddingModel?: string;
+  qdrantUrl?: string;
+  topK?: number;
+}): Promise<BiorxivPaper[]> {
+  const topK = options.topK ?? 100;
+  const store = new QdrantStore({
+    collectionName: options.collectionName,
+    openaiApiKey: options.openaiApiKey,
+    ...(options.embeddingModel ? { embeddingModel: options.embeddingModel } : {}),
+    ...(options.qdrantUrl ? { qdrantUrl: options.qdrantUrl } : {}),
+  });
+
+  const uniquePapers = new Map<string, BiorxivPaper>();
+
+  for (const query of options.queries) {
+    logger.info(`Searching for: "${query}" (top ${topK})`);
+    const papers = await store.search(query, topK);
+    for (const paper of papers) {
+      if (!uniquePapers.has(paper.doi)) {
+        uniquePapers.set(paper.doi, paper);
+      }
+    }
+    logger.info(`Found ${papers.length} papers, unique so far: ${uniquePapers.size}`);
+  }
+
+  const result = Array.from(uniquePapers.values());
+  logger.info(`Total unique papers for queries: ${result.length}`);
+  return result;
 }

@@ -5,7 +5,7 @@ import { loadSettings } from '../../configs.js';
 import { setupLogger } from '../../custom-logger.js';
 import type { BiorxivPaper } from '../../models.js';
 import { QdrantStore } from '../qdrant-store.js';
-import { extractAllPapers } from './paper-extractor.js';
+import { extractAllPapers, extractPapersByQueries } from './paper-extractor.js';
 import { createIdealQueryGenerator } from './ideal-query-generator.js';
 import { synthesizeUserQueries } from './query-synthesizer.js';
 import {
@@ -107,6 +107,8 @@ async function main(): Promise<void> {
   let resume = false;
   let skipEmbeddingCheck = true;
   let concurrency = 5;
+  const queries: string[] = [];
+  let topK = 100;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--output' && args[i + 1]) {
@@ -135,6 +137,12 @@ async function main(): Promise<void> {
       skipEmbeddingCheck = false;
     } else if (args[i] === '--concurrency' && args[i + 1]) {
       concurrency = Number.parseInt(args[i + 1]!, 10);
+      i++;
+    } else if (args[i] === '--query' && args[i + 1]) {
+      queries.push(args[i + 1]!);
+      i++;
+    } else if (args[i] === '--top-k' && args[i + 1]) {
+      topK = Number.parseInt(args[i + 1]!, 10);
       i++;
     }
   }
@@ -174,12 +182,25 @@ async function main(): Promise<void> {
     }
   }
 
-  // Step 1: Qdrant から全論文を抽出
-  logger.info('Step 1: Extracting papers from Qdrant...');
-  let papers = await extractAllPapers({
-    collectionName: settings.qdrantCollectionName,
-    qdrantUrl: settings.qdrantUrl,
-  });
+  // Step 1: Qdrant から論文を抽出（--query 指定時はキーワード検索、未指定時は全件）
+  let papers: BiorxivPaper[];
+  if (queries.length > 0) {
+    logger.info(`Step 1: Searching papers by queries: ${queries.join(', ')}`);
+    papers = await extractPapersByQueries({
+      queries,
+      collectionName: settings.qdrantCollectionName,
+      openaiApiKey: settings.openaiApiKey,
+      embeddingModel: settings.embeddingModel,
+      qdrantUrl: settings.qdrantUrl,
+      topK,
+    });
+  } else {
+    logger.info('Step 1: Extracting all papers from Qdrant...');
+    papers = await extractAllPapers({
+      collectionName: settings.qdrantCollectionName,
+      qdrantUrl: settings.qdrantUrl,
+    });
+  }
 
   if (limit) {
     papers = papers.slice(0, limit);
@@ -290,6 +311,12 @@ main().catch((error) => {
   );
   console.error(
     '  --resume                 前回の中断地点から再開',
+  );
+  console.error(
+    '  --query <keyword>        キーワードで論文をフィルタ（複数指定可、未指定時は全件）',
+  );
+  console.error(
+    '  --top-k <n>              キーワード検索のヒット数（default: 100）',
   );
   console.error(
     '  --embedding-check        Embedding品質検証を有効化（デフォルト: スキップ）',
