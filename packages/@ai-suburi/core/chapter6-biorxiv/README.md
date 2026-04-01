@@ -113,7 +113,10 @@ Step 1 で保存した JSONL ファイルを行単位でストリーム読み込
 
 ```bash
 # JSONL ファイルを指定して投入
-npx tsx chapter6-biorxiv/rag/qdrant-loader.ts --input storage/biorxiv-tmp/biorxiv_2025-03-01_2025-03-07_*.jsonl
+npx tsx chapter6-biorxiv/rag/qdrant-loader.ts --input storage/biorxiv-tmp/biorxiv_2021-03-01_2025-03-27_2026-03-28T00-50-45-897Z_dedup.jsonl
+
+# 既存データを上書き upsert
+npx tsx chapter6-biorxiv/rag/qdrant-loader.ts --force --input storage/biorxiv-tmp/biorxiv_2021-03-01_2025-03-27_2026-03-28T00-50-45-897Z_dedup.jsonl
 
 # バッチサイズを指定（デフォルト: 50）
 npx tsx chapter6-biorxiv/rag/qdrant-loader.ts --input storage/biorxiv-tmp/biorxiv_2025-03-01_2025-03-07_*.jsonl --batch-size 30

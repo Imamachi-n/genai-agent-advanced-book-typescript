@@ -277,6 +277,79 @@ pnpm tsx chapter6-biorxiv/rag/qdrant-loader.ts \
 [qdrant-loader] Loading complete. 1250 new papers added, 0 skipped. Total in collection: 1250
 ```
 
+### Qdrant に格納されるデータ構造
+
+Qdrant には論文 1 件につき 1 つの「ポイント」が格納されます。各ポイントは **ベクトル**（セマンティック検索用）と **ペイロード**（メタデータ）で構成されています。
+
+#### ベクトル化の対象
+
+論文の**タイトルとアブストラクトを結合した文字列**を OpenAI の `text-embedding-3-small`（1536 次元）でベクトル化します。
+
+```typescript title="chapter6-biorxiv/rag/qdrant-store.ts"
+// ベクトル化対象: タイトル + アブストラクト
+const documents = papers.map((p) => `${p.title}\n\n${p.abstract}`);
+const embeddings = await this.getEmbeddings(documents);
+```
+
+タイトルだけでなくアブストラクトも含めることで、論文の内容を反映したセマンティック検索が可能になります。
+
+#### ポイント ID の生成
+
+Qdrant のポイント ID には、DOI を SHA-1 ハッシュして UUID 形式に変換した値を使用します。これにより、同じ DOI の論文は必ず同じ ID になるため、`addDocuments` の `upsert` で自然に重複排除されます。
+
+```text
+DOI: "10.1101/2023.04.30.538439"
+  ↓ SHA-1 ハッシュ
+  ↓ UUID 形式に整形
+ID: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+```
+
+#### ペイロード（メタデータ）
+
+各ポイントには以下のメタデータがペイロードとして格納されます。検索後にこれらの情報を復元して `BiorxivPaper` オブジェクトとして返します。
+
+| フィールド | 型 | 内容 | 用途 |
+| --- | --- | --- | --- |
+| `doi` | string | 論文の DOI | 重複排除フィルタ（`must_not`） |
+| `title` | string | 論文タイトル | 検索結果の表示 |
+| `abstract` | string | 論文のアブストラクト | 簡易モードでの分析、リランキング |
+| `authors` | string | 著者リスト（セミコロン区切り） | レポートの引用情報 |
+| `published` | string | 公開日（YYYY-MM-DD） | レポートの引用情報 |
+| `category` | string | bioRxiv カテゴリ | フィルタリング |
+| `pdfLink` | string | PDF ダウンロード URL | 詳細モードでの PDF 取得 |
+| `link` | string | 論文ページの URL | レポートの参考文献リンク |
+| `version` | number | 論文のバージョン番号 | 最新版の識別 |
+| `document` | string | タイトル＋アブストラクト結合テキスト | ベクトル化元テキストの保存 |
+
+#### インデックス
+
+`doi` フィールドにはキーワードインデックスが作成されています。これにより、サブタスク間の DOI 重複排除（`must_not` フィルタ）を高速に実行できます。
+
+```typescript title="chapter6-biorxiv/rag/qdrant-store.ts"
+// DOI でフィルタリングするためのペイロードインデックス
+await this.client.createPayloadIndex(this.collectionName, {
+  field_name: 'doi',
+  field_schema: 'keyword',
+});
+```
+
+#### 検索時のデータ復元
+
+Qdrant から検索結果を取得した際、ペイロードのメタデータから `BiorxivPaper` オブジェクトを復元します。`relevanceScore` にはベクトル検索のコサイン類似度スコアが格納されます。
+
+```typescript title="chapter6-biorxiv/rag/qdrant-store.ts"
+return results.map((result) => {
+  const p = result.payload ?? {};
+  return {
+    doi: (p.doi as string) ?? '',
+    title: (p.title as string) ?? '',
+    abstract: (p.abstract as string) ?? '',
+    // ... その他のフィールド
+    relevanceScore: result.score, // コサイン類似度
+  };
+});
+```
+
 ## エージェントの実行
 
 ```bash

@@ -72,6 +72,7 @@ export class QdrantStore {
       payload: {
         doi: paper.doi,
         title: paper.title,
+        abstract: paper.abstract,
         authors: paper.authors.join('; '),
         published: paper.published,
         category: paper.category,
@@ -116,7 +117,7 @@ export class QdrantStore {
         title: (p.title as string) ?? '',
         link: (p.link as string) ?? '',
         pdfLink: (p.pdfLink as string) ?? '',
-        abstract: '',
+        abstract: (p.abstract as string) ?? '',
         published: (p.published as string) ?? '',
         authors: ((p.authors as string) ?? '').split('; '),
         category: (p.category as string) ?? '',
