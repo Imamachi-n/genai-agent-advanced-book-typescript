@@ -238,7 +238,64 @@ Done! Generated 54702 training examples.
 - レート制限（429）検知時はエクスポネンシャルバックオフで最大 3 回リトライ（30s → 60s → 90s）
 - 3 回リトライしても失敗した論文はスキップして処理を継続
 
-### Step 5: LangGraph Studio で実行
+### Step 5: ファインチューニングの実行（任意）
+
+Step 4 で生成した学習データを使って、OpenAI Fine-tuning API でモデルを学習させる。
+
+```bash
+# 基本的な実行（デフォルト: gpt-4.1-nano）
+npx tsx chapter6-biorxiv/rag/ft-pipeline/run-fine-tuning.ts \
+  --training-file storage/ft-training-data/training_2026-04-01.jsonl
+
+# モデルとサフィックスを指定
+npx tsx chapter6-biorxiv/rag/ft-pipeline/run-fine-tuning.ts \
+  --training-file storage/ft-training-data/training_2026-04-01.jsonl \
+  --model gpt-4.1-nano-2025-04-14 \
+  --suffix biorxiv-query
+
+# 検証データ付きで実行
+npx tsx chapter6-biorxiv/rag/ft-pipeline/run-fine-tuning.ts \
+  --training-file storage/ft-training-data/training_2026-04-01.jsonl \
+  --validation-file storage/ft-training-data/validation.jsonl
+
+# 既存ジョブの状態確認
+npx tsx chapter6-biorxiv/rag/ft-pipeline/run-fine-tuning.ts --status ftjob-xxxxxxxx
+
+# ジョブのキャンセル
+npx tsx chapter6-biorxiv/rag/ft-pipeline/run-fine-tuning.ts --cancel ftjob-xxxxxxxx
+```
+
+**実行結果の例:**
+
+```text
+[run-fine-tuning] Step 1: Uploading training file: storage/ft-training-data/training_2026-04-01.jsonl
+[run-fine-tuning] Training file uploaded: file-abc123
+[run-fine-tuning] Step 2: Creating fine-tuning job (model: gpt-4.1-nano-2025-04-14)
+[run-fine-tuning] Job created: ftjob-xyz789
+
+Fine-tuning job started!
+  Job ID: ftjob-xyz789
+  Model: gpt-4.1-nano-2025-04-14
+  Training file: file-abc123
+
+Polling every 30s. Press Ctrl+C to stop (job continues on OpenAI side).
+
+[run-fine-tuning] Status changed: validating_files → running
+[run-fine-tuning]   [info] Training started
+...
+[run-fine-tuning] Status changed: running → succeeded
+
+=== Fine-tuning completed! ===
+  Fine-tuned model: ft:gpt-4.1-nano-2025-04-14:your-org:biorxiv-query:xxxxxxxx
+  Trained tokens: 4500000
+
+To use this model, set the environment variable:
+  OPENAI_FAST_MODEL=ft:gpt-4.1-nano-2025-04-14:your-org:biorxiv-query:xxxxxxxx
+```
+
+完了後は環境変数 `OPENAI_FAST_MODEL` に FT 済みモデル名を設定するだけで、エージェントのクエリ拡張に反映される。
+
+### Step 6: LangGraph Studio で実行
 
 ```bash
 cd chapter6-biorxiv
@@ -274,9 +331,10 @@ chapter6-biorxiv/
 │   ├── qdrant-loader.ts         # Step B: JSONL → Qdrant 投入（ストリーム読み込み）
 │   ├── qdrant-store.ts          # Qdrant クライアント
 │   ├── rag-searcher.ts          # RAG 検索 + リランキング
-│   └── ft-pipeline/             # FT 学習データ生成パイプライン
-│       ├── generate-ft-data.ts  # CLI エントリーポイント
-│       ├── paper-extractor.ts   # Qdrant から全論文抽出
+│   └── ft-pipeline/             # FT 学習データ生成 & ファインチューニング
+│       ├── generate-ft-data.ts  # 学習データ生成 CLI
+│       ├── run-fine-tuning.ts   # ファインチューニング実行 CLI
+│       ├── paper-extractor.ts   # Qdrant から論文抽出（全件 / キーワード検索）
 │       ├── query-synthesizer.ts # 合成クエリ生成（LLM）
 │       ├── ideal-query-generator.ts # 理想クエリ生成（Embedding 検証付き）
 │       ├── training-data-formatter.ts # JSONL 整形
