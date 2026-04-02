@@ -293,7 +293,31 @@ To use this model, set the environment variable:
   OPENAI_FAST_MODEL=ft:gpt-4.1-nano-2025-04-14:your-org:biorxiv-query:xxxxxxxx
 ```
 
-完了後は環境変数 `OPENAI_FAST_MODEL` に FT 済みモデル名を設定するだけで、エージェントのクエリ拡張に反映される。
+完了後は環境変数 `OPENAI_FINE_TUNED_MODEL` に FT 済みモデル名を設定すると、エージェント実行時にモデル選択が表示される。
+
+```bash
+# FT 済みモデルを環境変数に設定
+export OPENAI_FINE_TUNED_MODEL="ft:gpt-4.1-nano-2025-04-14:your-org:biorxiv-query:xxxxxxxx"
+
+# エージェント実行（モード選択の後にモデル選択が表示される）
+npx tsx chapter6-biorxiv/agent/research-agent.ts "生成AIを用いたゲノム解析の最新動向"
+```
+
+対話の流れ:
+
+```text
+分析モードを選択してください:
+1. 簡易版（タイトル+アブストラクトのみ・高速）
+2. 詳細版（PDF全文分析・高精度）
+> 1
+
+検索モデルを選択してください:
+1. デフォルトモデル
+2. ファインチューニング済みモデル（ft:gpt-4.1-nano-2025-04-14:your-org:biorxiv-query:xxxxxxxx）
+> 2
+```
+
+`OPENAI_FINE_TUNED_MODEL` が未設定の場合、モデル選択はスキップされデフォルトモデルで実行される。
 
 ### Step 6: LangGraph Studio で実行
 
@@ -369,6 +393,7 @@ chapter6-biorxiv/
 | `OPENAI_API_KEY` | ✅ | - | OpenAI API キー |
 | `OPENAI_SMART_MODEL` | - | `gpt-4o` | 高品質推論用モデル |
 | `OPENAI_FAST_MODEL` | - | `gpt-4o-mini` | 高速処理用モデル |
+| `OPENAI_FINE_TUNED_MODEL` | - | - | FT 済みモデル（設定するとモデル選択が表示される） |
 | `OPENAI_REPORTER_MODEL` | - | `gpt-4o` | レポート生成用モデル |
 | `EMBEDDING_MODEL` | - | `text-embedding-3-small` | エンベディングモデル |
 | `QDRANT_URL` | - | `http://localhost:6333` | Qdrant サーバー URL |

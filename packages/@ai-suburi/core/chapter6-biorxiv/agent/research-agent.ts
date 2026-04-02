@@ -11,7 +11,7 @@ import type {
   CompiledStateGraph,
   LangGraphRunnableConfig,
 } from '@langchain/langgraph';
-import type { ChatOpenAI } from '@langchain/openai';
+import { ChatOpenAI } from '@langchain/openai';
 import * as readline from 'node:readline';
 
 import { HearingChain } from '../chains/hearing-chain.js';
@@ -75,6 +75,10 @@ const ResearchAgentAnnotation = Annotation.Root({
     reducer: (_prev, next) => next,
     default: () => 'detailed',
   }),
+  useFineTunedModel: Annotation<boolean>({
+    reducer: (_prev, next) => next,
+    default: () => false,
+  }),
   // Output
   finalOutput: Annotation<string>({
     reducer: (_prev, next) => next,
@@ -91,6 +95,8 @@ export class ResearchAgent {
   readonly graph: CompiledStateGraph<any, any, any, any>;
   private recursionLimit: number;
   private paperSearchAgent: PaperSearchAgent;
+  private ftPaperSearchAgent: PaperSearchAgent | null;
+  private fineTunedModel: string;
 
   constructor(
     llm?: ChatOpenAI,
@@ -99,6 +105,7 @@ export class ResearchAgent {
     settings?: Settings,
   ) {
     const s = settings ?? loadSettings();
+    this.fineTunedModel = s.openaiFineTunedModel;
     const _llm = llm ?? createLlm(s);
     const _fastLlm = fastLlm ?? createFastLlm(s);
     const _reporterLlm = reporterLlm ?? createReporterLlm(s);
@@ -130,6 +137,28 @@ export class ResearchAgent {
       recursionLimit: s.maxRecursionLimit,
       maxWorkers: s.maxWorkers,
     });
+
+    // FT モデルが設定されている場合は、FT 用 PaperSearchAgent も作成
+    if (this.fineTunedModel) {
+      const ftLlm = new ChatOpenAI({
+        model: this.fineTunedModel,
+        temperature: 0,
+      });
+      const ftSearcher = new RagSearcher(ftLlm, store, {
+        openaiApiKey: s.openaiApiKey,
+        embeddingModel: s.embeddingModel,
+        maxSearchResults: s.maxSearchResults,
+        maxPapers: s.maxPapers,
+        debug: s.debug,
+      });
+      this.ftPaperSearchAgent = new PaperSearchAgent(ftLlm, ftSearcher, {
+        recursionLimit: s.maxRecursionLimit,
+        maxWorkers: s.maxWorkers,
+      });
+    } else {
+      this.ftPaperSearchAgent = null;
+    }
+
     const evaluateTask = new TaskEvaluator(_llm, s.maxEvaluationRetryCount);
     const generateReport = new Reporter(_reporterLlm);
 
@@ -172,6 +201,10 @@ export class ResearchAgent {
       .addNode('select_mode', () => {
         logger.info('|--> select_mode');
         return this.selectMode();
+      }, { ends: ['select_model', 'goal_setting'] })
+      .addNode('select_model', () => {
+        logger.info('|--> select_model');
+        return this.selectModel();
       }, { ends: ['goal_setting'] })
       .addNode('goal_setting', (state) => {
         logger.info('|--> goal_setting');
@@ -200,21 +233,41 @@ export class ResearchAgent {
 
   /**
    * select_mode ノードの処理。interrupt で分析モードの選択をユーザーに求める。
-   * @returns goal_setting への遷移コマンド（analysisMode を含む）
+   * FT モデルが設定されている場合は select_model へ、なければ goal_setting へ遷移する。
    */
   private selectMode(): Command {
-    const selection = interrupt(
+    const modeSelection = interrupt(
       '分析モードを選択してください:\n1. 簡易版（タイトル+アブストラクトのみ・高速）\n2. 詳細版（PDF全文分析・高精度）',
     );
 
     const mode: 'simple' | 'detailed' =
-      selection === '1' || selection === 'simple' ? 'simple' : 'detailed';
-
+      modeSelection === '1' || modeSelection === 'simple' ? 'simple' : 'detailed';
     logger.info(`分析モード: ${mode}`);
+
+    // FT モデルが設定されている場合は select_model へ
+    const nextNode = this.fineTunedModel ? 'select_model' : 'goal_setting';
+
+    return new Command({
+      goto: nextNode,
+      update: { analysisMode: mode },
+    });
+  }
+
+  /**
+   * select_model ノードの処理。interrupt で検索モデルの選択をユーザーに求める。
+   * FT モデルが設定されている場合のみ呼ばれる。
+   */
+  private selectModel(): Command {
+    const modelSelection = interrupt(
+      `検索モデルを選択してください:\n1. デフォルトモデル\n2. ファインチューニング済みモデル（${this.fineTunedModel}）`,
+    );
+
+    const useFineTuned = modelSelection === '2' || modelSelection === 'ft';
+    logger.info(`検索モデル: ${useFineTuned ? this.fineTunedModel : 'デフォルト'}`);
 
     return new Command({
       goto: 'goal_setting',
-      update: { analysisMode: mode },
+      update: { useFineTunedModel: useFineTuned },
     });
   }
 
@@ -256,7 +309,18 @@ export class ResearchAgent {
     state: Record<string, unknown>,
     config: LangGraphRunnableConfig,
   ): Promise<Command> {
-    const output = await this.paperSearchAgent.graph.invoke(state, {
+    // FT モデル選択時は ftPaperSearchAgent を使用
+    const useFineTuned = (state.useFineTunedModel as boolean) ?? false;
+    const agent =
+      useFineTuned && this.ftPaperSearchAgent
+        ? this.ftPaperSearchAgent
+        : this.paperSearchAgent;
+
+    if (useFineTuned && this.ftPaperSearchAgent) {
+      logger.info(`Using fine-tuned model: ${this.fineTunedModel}`);
+    }
+
+    const output = await agent.graph.invoke(state, {
       ...config,
       recursionLimit: this.recursionLimit,
     });

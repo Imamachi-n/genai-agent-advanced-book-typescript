@@ -6,6 +6,7 @@ export interface Settings {
   // モデル設定
   openaiSmartModel: string;
   openaiFastModel: string;
+  openaiFineTunedModel: string;
   openaiReporterModel: string;
   embeddingModel: string;
   temperature: number;
@@ -39,6 +40,7 @@ export function loadSettings(): Settings {
     // モデル設定
     openaiSmartModel: process.env.OPENAI_SMART_MODEL ?? 'gpt-4o',
     openaiFastModel: process.env.OPENAI_FAST_MODEL ?? 'gpt-4o-mini',
+    openaiFineTunedModel: process.env.OPENAI_FINE_TUNED_MODEL ?? '',
     openaiReporterModel: process.env.OPENAI_REPORTER_MODEL ?? 'gpt-4o',
     embeddingModel: process.env.EMBEDDING_MODEL ?? 'text-embedding-3-small',
     temperature: Number(process.env.TEMPERATURE ?? '0'),

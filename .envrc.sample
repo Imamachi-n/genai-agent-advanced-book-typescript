@@ -8,5 +8,8 @@ export E2B_API_KEY="your-key"
 export COHERE_API_KEY="your-key"
 export JINA_API_KEY="your-key"
 
+# Chapter 6 bioRxiv: ファインチューニング済みモデル（オプション）
+# export OPENAI_FINE_TUNED_MODEL="ft:gpt-4.1-nano-2025-04-14:your-org:biorxiv-query:xxxxxxxx"
+
 # LangGraph Studio（オプション）
 # export LANGSMITH_API_KEY="lsv2_..."
