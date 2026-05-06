@@ -8,6 +8,8 @@
     "tsx": "pnpm --filter @ai-suburi/core exec tsx",
     "dev:docs": "pnpm --filter @ai-suburi/docs start",
     "build:docs": "pnpm --filter @ai-suburi/docs build",
+    "serve:docs": "pnpm --filter @ai-suburi/docs serve",
+    "preview:docs": "pnpm build:docs && pnpm serve:docs",
     "cdk": "pnpm --filter @ai-suburi/bedrock-agentcore-cdk cdk",
     "cdk:synth": "pnpm --filter @ai-suburi/bedrock-agentcore-cdk synth",
     "cdk:deploy": "pnpm --filter @ai-suburi/bedrock-agentcore-cdk deploy",
