@@ -27,6 +27,8 @@ Claude Code には、よく使う手順や独自ルールをファイルにま�
 
 ## 概要
 
+Skill は CLAUDE.md やスラッシュコマンドと並ぶ「Claude に追加情報を渡す仕組み」の一つですが、**呼ばれたときだけ展開される** という特性が他の手段と決定的に違います。本節ではまず Skill の正体（ディレクトリ構造）を押さえ、CLAUDE.md・スラッシュコマンドとの使い分けを整理します。後続の節で扱う設計原則やアンチパターンは、すべてこの「呼ばれたときだけ展開される」特性を最大限活かすためのものだと捉えてください。
+
 ### Skill とは何か
 
 Skill は **`SKILL.md` を中核とした 1 つのディレクトリ** です。フロントマター（YAML）でメタデータを宣言し、本文（Markdown）に「何を・どう実行するか」を書きます。Claude は description を見て自動起動するか、ユーザーが `/skill-name` で明示的に呼び出します。
@@ -117,6 +119,18 @@ First, you'll need to install it using pip. Then you can use the code below...
 2. Check for potential bugs or edge cases
 3. Suggest improvements for readability and maintainability
 4. Verify adherence to project conventions
+```
+
+```markdown title="Medium freedom: 推奨パターンを示しつつパラメータ調整は許す"
+## Generate release notes
+
+Use the helper script as the default path:
+
+​```bash
+python scripts/release_notes.py --since {{LAST_TAG}} --format markdown
+​```
+
+`--format` は `markdown` を既定としつつ、配信先が Slack なら `slack`、社内 Wiki なら `confluence` に切り替えてください。`--since` は直近のリリースタグを基準に決めます。
 ```
 
 ```markdown title="Low freedom: DB マイグレーションは順序固定・改変禁止"
@@ -249,7 +263,7 @@ graph TD
 
 ## 配置場所と優先度
 
-Skill は 4 つの階層に置けます。優先度は **Enterprise > Personal > Project > Plugin**（Plugin だけは `plugin-name:skill-name` という名前空間で衝突回避）。
+Skill は 4 つの階層に置けます。優先度は **Enterprise > Personal > Project > Plugin** で、**同じ `name` の Skill が複数階層に存在する場合は優先度の高い側が採用** されます。Plugin だけは `plugin-name:skill-name` という名前空間で衝突を回避するため、上書きではなく共存します。
 
 | 階層 | パス | 適用範囲 |
 | --- | --- | --- |
@@ -315,6 +329,12 @@ description: |
 ```yaml title="Bad: 抽象的・一人称・トリガー語彙ゼロ"
 description: I can help with documents and stuff like that.
 ```
+
+:::info Negative example の書き方
+
+「いつ使わないか」を書くときは、**競合する別 Skill の名前を具体的に挙げる** のが効果的です。「Do not use for X」だけだと Claude は別の選択肢を見つけられず、結局この Skill を呼んでしまうことがあります。`Do not use for committed history — see /pr-summary for that.` のように、**代替先まで書ききる** ことで誤起動と無起動の両方を抑えられます。
+
+:::
 
 :::tip 9.4.2 とつなげて読む
 
@@ -506,7 +526,17 @@ Deploy $ARGUMENTS to production:
 
 SKILL.md 内の `` !`<command>` `` は **Claude に渡る前にシェル実行** され、出力で置換されます。Claude にコマンドを実行させているのではなく、プロンプト生成時の **プリプロセス** です。
 
-複数行のコマンドはフェンス付きブロックで書きます。
+```mermaid
+flowchart LR
+    Trigger["ユーザー発話 or<br/>/skill-name 実行"] --> Preprocess["プリプロセス<br/>! 記法をシェル実行"]
+    Preprocess --> Inject["出力を本文に差し込み"]
+    Inject --> Claude["Claude へ送信<br/>（コマンドの実行履歴は残らない）"]
+
+    style Preprocess fill:#fff3e0
+    style Claude fill:#e3f2fd
+```
+
+複数行のコマンドはフェンス付きブロック（言語指定 `!`）で書きます。各行が個別に実行され、stdout がまとめて差し込まれます。
 
 ````markdown title="複数行のシェル注入"
 ## Environment
@@ -621,6 +651,8 @@ Look for patterns across sources. What themes appear repeatedly? Where do source
 このループは 9.4.2 で扱った「観測 → 修正 → 再評価」の最小実装です。Skill 本文に組み込んでおけば、Claude が **自分で気づき、自分で直す** サイクルを回せるようになります。
 
 ## コンテンツガイドライン
+
+Skill 本文は **ドキュメントというよりプロンプトの一部** です。同じ事実を伝えるにも、書き方ひとつで Claude の挙動が大きく変わります。本節では、長期運用に耐える Skill にするための執筆ガイドラインを 5 つ取り上げます。いずれも「読みやすさ」ではなく **「Claude が誤解しない・古びない」** を最優先に組み立てた指針です。
 
 ### 時間に依存する記述を避ける
 
@@ -939,6 +971,12 @@ reader = PdfReader("file.pdf")
 ## コミュニティ知見：実運用から見えたベストプラクティス
 
 公式ドキュメントは仕様の正確性を優先する性格上、実運用で初めて見えてくる「肌感覚」のベストプラクティスは外部記事のほうが豊富です。ここでは、本章執筆時点で参照価値の高いコミュニティ記事から、**公式に明記されていないか、控えめにしか触れられていない知見** をまとめます。
+
+特に注目してほしいのは次の 3 点です。
+
+- **Skill の二分法**（Capability Uplift / Encoded Preference）— どこに投資すれば最大効果が出るか
+- **Single Responsibility Principle** — Skill の境界線をどこで引くべきか
+- **トークンコスト・concurrency の実測値** — 「Skill 化すべきでない処理」を見極める判断材料
 
 ### Skill の二分法：Capability Uplift と Encoded Preference
 
