@@ -936,6 +936,111 @@ reader = PdfReader("file.pdf")
 - **動的注入結果へのプロンプトインジェクション**：`!`gh pr view`` で取得した外部テキストにインジェクション文字列が混じり、Skill 経由で `Bash` を叩かせられる（9.2 の IPI と同型のリスク）
 - **Skill 数の増やしすぎ**：DSPy / GEPA の研究と同様、ツール候補が増えれば Claude の選択精度は落ちます。**増やすより整理** する
 
+## コミュニティ知見：実運用から見えたベストプラクティス
+
+公式ドキュメントは仕様の正確性を優先する性格上、実運用で初めて見えてくる「肌感覚」のベストプラクティスは外部記事のほうが豊富です。ここでは、本章執筆時点で参照価値の高いコミュニティ記事から、**公式に明記されていないか、控えめにしか触れられていない知見** をまとめます。
+
+### Skill の二分法：Capability Uplift と Encoded Preference
+
+実運用では Skill は大きく 2 種類に分けられます。それぞれ作り方の力点が違います。
+
+| 種別 | 目的 | 例 |
+| --- | --- | --- |
+| **Capability Uplift（能力拡張）** | Claude が単独ではできないことを実行可能にする | DOCX 編集、PDF フォーム填め、Playwright テスト、MCP 連携、社内 CLI 連携 |
+| **Encoded Preference（嗜好の埋め込み）** | Claude が「自分たちの流儀」で動くように制約する | フロントデザイン規約、コミット規約、トーン・オブ・ボイス、AI slop 防止 |
+
+複数のコミュニティ著者が一致して指摘するのは、「**最大の効果は、汎用タスクの自動化ではなく、自分の環境・チーム規約・社内ツールをエンコードしたとき** に得られる」という点です。Datadog 用 CLI ラッパー、社内デザインシステム、ドキュメントのトーンなど、**「自分たちにしか書けない」もの** こそが Skill の本領です。
+
+### Single Responsibility Principle：1 Skill 1 責務に分割せよ
+
+ある執筆支援 Skill の事例（Zenn / gixo）では、当初「全工程入りの巨大 Skill」を作ったところ次の問題に直面しました。
+
+- 「検証は不要だが書きたい」記事に対応できない
+- 「自分で書いたドラフトをレビューだけしてほしい」を単独実行できない
+
+最終的に **6 つの責務分離 Skill**（ideation / research / verification / drafting / review / publication）に分割して解決しています。Skill 設計時は **「これを単独で呼びたいシナリオは何か？」** を常に問い、複数あれば分割を検討するのが安全です。これは Progressive Disclosure（情報のロード順）に対し、**Skill 単位の境界線をどこで引くか** というメタな粒度の議論です。
+
+### Skill と Instructions（CLAUDE.md）の責務を分離する
+
+実運用では、
+
+- **CLAUDE.md（Instructions）** は **恒久的なルール**（命名規則、スタイル、プロジェクト固有の事実）
+- **Skill** は **条件付きワークフロー**（複数ステップ、分岐あり、副作用あり）
+
+として分けるのが保守コスト最小だと、コミュニティでは経験則的に共有されています（Qiita / aktsmm）。本章冒頭で述べた「CLAUDE.md の特定セクションが事実ではなく手順になってきたら Skill 化のサイン」と同じ視点を、運用側から再定義したものと言えます。
+
+### Skill 選定はアルゴリズムではなく純粋な LLM の言語理解
+
+ある first-principles 解析記事（Lee Hanchung）では、Claude Code の skill 選定が **キーワードマッチでも埋め込み検索でもなく、LLM が description を読んで選ぶ** だけの設計だと指摘されています。
+
+> _There is no algorithmic skill selection or AI-powered intent detection at the code level._
+
+実装上の含意は明快で、description は **「自然な日本語／英語の説明として読み下せる文章」** にすべきで、SEO 的なキーワード羅列は逆効果です。本章「description 設計のベストプラクティス」で示した「ユーザーの自然な発話に出る語彙を入れる」「三人称で書く」指針は、この実装事実に支えられています。
+
+### Skill 起動のトークンコスト：1 回 1,500+ トークン
+
+同じ first-principles 解析の計測によれば、Skill 本文は 1 回の起動で **1,500 トークン超** を消費することも珍しくありません。従来の tool 呼び出しが ~100 トークンであることと比べると、**Skill はかなり重い拡張機能** です。
+
+実用上の指針は次のとおりです。
+
+- 「3 行のプロンプトで済む処理」を Skill 化しない
+- 1 セッションで何度も同じ Skill が起動するなら、その内容を CLAUDE.md に格上げするか、本文を圧縮する
+- auto-compaction 後の再アタッチ予算（5,000/Skill, 25,000 合計）を超えないよう、本文サイズを意識する
+
+:::caution Concurrency-safe ではない
+
+公式に明記されていないものの運用上重要な事実として、**Skill はネスト・並列での呼び出しが安全ではない** と報告されています。1 つの Skill から別の Skill を再帰的に呼ぶような設計は避け、必要なら `context: fork` でサブエージェントに切り出すか、ワークフローを SKILL.md 内に書ききるのが無難です。
+
+:::
+
+### 出力スタイルそのものを Skill にする（Caveman パターン）
+
+Jonathan Fulton が紹介する **Caveman Skill** は、Claude の冗長な前置きを削り、要点だけ短文で返させる Skill です。本人の計測で **約 75% のトークン削減** を達成しており、「Skill は機能だけでなく **出力フォーマット・文体** も制御できる」典型例です。
+
+トーン・冗長度・許容語彙といった「文体」を Skill 化するアプローチは、前述の Blog Writing 事例でも採用されており、共通する設計思想です。9.4.2 で論じた「ツール記述の精緻化」を **出力側** に拡張した応用例と捉えられます。
+
+### Adversarial Review の二段構え
+
+通常のコードレビューに加えて、**「壊そうと試みる」敵対的レビュー**（adversarial review）を別 Skill として用意すると、レース条件・暗黙の前提・アーキテクチャ判断の妥当性チェックなど、人間レビュアーが見落としがちな問題を捉えやすくなります（Jonathan Fulton）。
+
+`/review` と `/adversarial-review` の 2 系統を持つことで、PR の重要度に応じて使い分けられます。これは「同一ドメインに対する複数視点の Skill を並走させる」設計の好例です。
+
+### コミュニティ Skill のセキュリティ実態
+
+ある日本語入門記事（Qiita / aktsmm）では、コミュニティ marketplace の Skill を調査した結果として **「約 26% に脆弱性、約 5% に明らかな悪意ある挙動が含まれていた」** という数値が紹介されています（一次ソースの追検証は推奨）。
+
+外部 Skill を導入するときの実運用ルールは、
+
+- **公式 [anthropics/skills](https://github.com/anthropics/skills)** か、検証済み・著名な著者のリポジトリに限定
+- 社内では Plugin / Project Skill として Git で集中管理し、CODEOWNERS で必須レビュー
+- `allowed-tools` は最小権限、コマンドプレフィックスまで限定（前述）
+
+の 3 点を最低ラインとし、9.2 で扱った agentic AI のサプライチェーン観点で運用してください。
+
+### ハイスター Skill の構造的傾向
+
+GitHub のスター数上位 Skill リポジトリを観察すると、成功パターンは大きく 2 つに分かれます（claudefa.st）。
+
+- **強い 1 つの意見**：TDD を強制する `superpowers`、Karpathy 流の calibration prompt など、「これだけやれば良い」という尖った設計
+- **総合ライブラリ**：1,000+ Skill を網羅する `awesome-agent-skills` のような探索ハブ
+
+中途半端な汎用 pack は **「Skills soup」** と呼ばれ、hook / agent / routing を自前で繋ぎ込む手間で価値が相殺されてしまうと指摘されています。
+
+> _Most teams overspend on assembly and underspend on the work the assembly was supposed to enable._
+
+自社用の Skill ライブラリを作る場合も、**「主張のある 1 軸」を決めて他を剥がす** ほうが、結果的に使われやすいライブラリになります。
+
+### 参考にしたコミュニティ記事
+
+- [Claude Agent Skills: A First Principles Deep Dive (Lee Hanchung)](https://leehanchung.github.io/blogs/2025/10/26/claude-skills-deep-dive/) — トークンコスト計測・concurrency 警告など実装解析
+- [Agent Skills: The Cheat Codes for Claude Code (Jonathan Fulton)](https://medium.com/jonathans-musings/agent-skills-the-cheat-codes-for-claude-code-b8679f0c3c4d) — Caveman / Adversarial Review / Datadog 連携の体験談
+- [How I Streamlined Blog Writing with Claude Code Agent Skills (Zenn / gixo)](https://zenn.dev/gixo/articles/claude-skills-blog-writing-assistant) — Single Responsibility での 6 Skill 分割の失敗→改善
+- [はじめての Agent Skills 12 選＆リポジトリ一覧 (Qiita / aktsmm)](https://qiita.com/aktsmm/items/08eef2cdeeb0a32b69a2) — Skill vs Instructions の整理、コミュニティ Skill のセキュリティ実態
+- [9 Best Claude Code Skills (claudefa.st)](https://claudefa.st/blog/tools/skills/best-claude-code-skills) — ハイスター Skill の構造分析と Skills soup 警告
+- [10 Must-Have Skills for Claude in 2026 (Medium / unicodeveloper)](https://medium.com/@unicodeveloper/10-must-have-skills-for-claude-and-any-coding-agent-in-2026-b5451b013051) — Capability Uplift と Encoded Preference の二分法
+- [VoltAgent/awesome-agent-skills](https://github.com/VoltAgent/awesome-agent-skills) — 1,000+ Skill のカタログ
+- [anthropics/skills](https://github.com/anthropics/skills) — 公式リファレンス Skill 集
+
 ## Skill 公開前チェックリスト
 
 公式ガイド末尾のチェックリストを和訳・整理したものです。共有前に必ず一巡してください。
